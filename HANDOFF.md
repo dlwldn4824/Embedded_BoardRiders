@@ -56,7 +56,13 @@ python -m pytest tests -q
 - 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리.
 - 차선 CNN 회귀 모델: 규칙 기반 주행 기록(`--record` + CSV `fid`)으로 라벨을 모은 뒤 진행한다.
 
-## 5. 라벨 원본
-- 사람이 검토한 라벨은 모두 `data/yolo_clean_v2/labels/` 에 들어 있다.
-- `data/yolo_clean_v2` 는 원본 `yolo_dataset.zip` 에 노트북에서 검토한 라벨을 합쳐 만든 것이다.
-  다시 만들 일이 있으면 원본 zip 과 `sign/clean_dataset.py --extra` 가 필요하다. 검토 폴더 `data/to_label_review` 는 노트북에만 있다.
+## 5. 레포에 함께 올라간 데이터
+- `data/yolo_clean_v2/`: 바로 학습할 수 있는 데이터셋. 사람이 검토한 라벨이 모두 들어 있다.
+- `data/to_label_review/`: 라벨이 없던 187장과 검토를 마친 라벨.
+- `data/raw/`: 원본 `yolo_dataset`, 차선 주행 run 2개(`run_20261028_*`).
+- 다시 만들 때:
+  ```bash
+  python sign/clean_dataset.py data/raw/yolo_dataset data/yolo_clean_v2 --extra data/to_label_review
+  python sign/flip_left_to_right.py data/yolo_clean_v2
+  ```
+- 참고 자료(`data/reference/`)는 올리지 않았다.
