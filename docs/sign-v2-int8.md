@@ -85,7 +85,7 @@ python sign/compare_int8.py runs/sign/v2/weights/best.pt weights/sign_v2_fp32.tf
 # Pi 5 (64-bit Raspberry Pi OS), 레포 루트에서
 git pull
 pip install ultralytics ai-edge-litert simple-pid gpiozero opencv-python pyyaml
-python3 -m drive.main --mode real --signs weights/sign_v2_int8.tflite
+python3 -m drive.main --mode real --signs weights/sign_v2_int8.tflite   # v3 가 나왔다: docs/sign-v3.md 의 sign_v3_8n_int8.tflite 를 쓴다
 ```
 
 - 처음 실행할 때 `표지판 검출기: weights/sign_v2_int8.tflite` 가 출력되는지 본다.

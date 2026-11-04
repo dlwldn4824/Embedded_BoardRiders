@@ -9,7 +9,7 @@ drive/signs.py 의 YoloSignDetector 가 그대로 읽는다 (클래스 이름은
 준비 (메인 .venv 와 따로):
     python -m venv .venv-tf
     .venv-tf\\Scripts\\activate
-    pip install "tensorflow==2.19.*" tf_keras onnx2tf onnx onnx_graphsurgeon sng4onnx onnxruntime onnxslim psutil ai-edge-litert ultralytics
+    pip install "tensorflow==2.19.*" tf_keras onnx2tf onnx onnx_graphsurgeon sng4onnx onnxruntime onnxslim psutil ai-edge-litert pyyaml ultralytics
 
 사용법:
     python sign/export_int8.py runs/sign/v2/weights/best.pt --out weights/sign_v2_int8.tflite
@@ -70,6 +70,24 @@ def patch_detect_normalized(imgsz):
     Detect._get_decode_boxes = _get_decode_boxes
 
 
+def disable_end2end(model):
+    """YOLO26 처럼 NMS 없는(end2end) 모델은 one2many 출력 (1, 4+nc, N) 으로 내보낸다.
+
+    end2end 출력은 (x1, y1, x2, y2, score, class) 가 한 텐서라, INT8 에서 클래스 번호(0~9)와 좌표가 한 스케일로 뭉개진다.
+    ultralytics 도 LiteRT INT8 에서는 같은 이유로 end2end 를 끈다. NMS 는 Pi 에서 ultralytics 가 한다.
+    """
+    cls = type(model.model)
+    if not isinstance(getattr(cls, "end2end", None), property) or not model.model.end2end:
+        return False
+
+    def _set(self, value):
+        self.model[-1].end2end = False   # exporter 가 True 로 돌려놓지 못하게 막는다
+
+    cls.end2end = property(lambda self: False, _set)
+    model.model.model[-1].end2end = False
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("weights", type=Path)
@@ -88,7 +106,9 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         patch_detect_normalized(args.imgsz)
-        onnx = Path(model.export(format="onnx", imgsz=args.imgsz, opset=17, simplify=True))
+        if disable_end2end(model):
+            print("end2end 모델 → one2many 출력으로 내보낸다 (NMS 는 추론 쪽에서)")
+        onnx =Path(model.export(format="onnx", imgsz=args.imgsz, opset=17, simplify=True))
         shutil.copy(onnx, tmp / "model.onnx")
         onnx.unlink()   # 정규화 좌표용 ONNX 라 일반 ONNX 와 섞이지 않게 지운다
 

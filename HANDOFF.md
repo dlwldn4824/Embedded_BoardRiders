@@ -52,11 +52,20 @@ python -m pytest tests -q
   - v2: val mAP50 0.971, mAP50-95 0.749 (같은 val 에서 기준선은 0.970 / 0.736).
   - `weights/sign_v2_int8.tflite`: 3.25MB, mAP50 0.949. Pi 실행: `python3 -m drive.main --mode real --signs weights/sign_v2_int8.tflite`
   - 변환 `sign/export_int8.py`, 비교 `sign/compare_int8.py`. Windows 에서도 돈다 (`.venv-tf` 따로 만듦).
+- **v3: 실차 배경 + red_line 보강 + YOLO11/26 비교 + 320 (2026-11-05)** → [docs/sign-v3.md](docs/sign-v3.md)
+  - **Pi 기본값: `weights/sign_v3_8n_int8.tflite`**
+    - mAP50 0.957, conf 0.5 재현율 0.906, red_line 재현율 0.72 (v2 INT8 은 0.53).
+  - `python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite`
+  - 대안:
+    - red_line 을 자주 놓치면 `sign_v3_26n_int8.tflite` (red_line 재현율 0.82, 대신 1.7배 느림)
+    - Pi 가 느리면 `sign_v3_26n_320_int8.tflite` (`SIGN_IMGSZ = 320` 으로 같이 바꿈)
 - `deploy/collect.py`: 차선 수집 코드. 차동 구동이고, 연속 조향을 기록한다. 아직 Pi 에서 돌려 보지 않았다.
 
 ## 4. 아직 안 된 것
 - Pi 5 에서 INT8 추론 시간 측정 (데스크톱 CPU 에서는 16ms).
-- 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리. INT8 에서 red_line 재현율이 낮다 (conf 0.5 에서 0.53).
+- 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리.
+  - 실차 카메라에서 표지판 재현율은 아직 모른다 (갖고 있는 실차 run 에는 표지판이 없다).
+  - v3 는 실차 카메라에서 멀리 있는 횡단보도를 거의 잡지 않는다 (주행 이벤트에는 영향 없음).
 - 차선 CNN 회귀 모델: 규칙 기반 주행 기록(`--record` + CSV `fid`)으로 라벨을 모은 뒤 진행한다.
 
 ## 5. 데이터

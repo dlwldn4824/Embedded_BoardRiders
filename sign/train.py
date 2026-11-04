@@ -24,6 +24,8 @@ def main():
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--device", default="mps", help="mps (Mac) / 0 (CUDA) / cpu")
     ap.add_argument("--name", default="baseline")
+    ap.add_argument("--hsv-v", type=float, default=0.4, help="밝기 증강. 실차 카메라 색감 차이를 버티게 하려면 키운다")
+    ap.add_argument("--hsv-s", type=float, default=0.7)
     args = ap.parse_args()
 
     model = YOLO(args.model)
@@ -32,7 +34,7 @@ def main():
         project=str(ROOT / "runs/sign"), name=args.name, exist_ok=True,
         patience=15, seed=0, workers=4,
         fliplr=0.0, flipud=0.0, mosaic=1.0, mixup=0.0,
-        hsv_h=0.015, hsv_s=0.7, hsv_v=0.4, degrees=0.0, translate=0.1, scale=0.5,
+        hsv_h=0.015, hsv_s=args.hsv_s, hsv_v=args.hsv_v, degrees=0.0, translate=0.1, scale=0.5,
         plots=True,
     )
 

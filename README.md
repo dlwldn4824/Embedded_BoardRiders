@@ -187,8 +187,10 @@ Pi 5 (64-bit Raspberry Pi OS), 레포 루트에서:
 
 ```bash
 pip install ultralytics ai-edge-litert simple-pid gpiozero opencv-python pyyaml
-python3 -m drive.main --mode real --signs weights/sign_v2_int8.tflite
+python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite
 ```
+
+표지판 가중치는 `sign_v3_8n_int8.tflite` 가 기본값입니다. 대안과 비교 결과는 [docs/sign-v3.md](docs/sign-v3.md) 에 있습니다.
 
 노트북에서 주행 로직 확인:
 
@@ -204,7 +206,7 @@ drive/     주행 코드 (Pi 실행: python3 -m drive.main, 시뮬레이터: pyt
 sign/      표지판 YOLO 데이터 정리 · 학습 · INT8 변환
 lane/      차선 데이터 점검 (차선 CNN 모델은 다음 단계)
 deploy/    차선 데이터 수집 코드
-weights/   표지판 모델 (sign_v2_int8.tflite 등)
+weights/   표지판 모델 (Pi 기본값 sign_v3_8n_int8.tflite)
 data/      학습 데이터 (공개 레포에는 없음)
 docs/      설계 · 결과 문서, 발표 슬라이드 이미지
 tests/     컨트롤러 · 표지판 필터 테스트
@@ -213,6 +215,7 @@ tests/     컨트롤러 · 표지판 필터 테스트
 ## 문서
 - 다른 PC 에서 이어받기: [HANDOFF.md](HANDOFF.md)
 - 표지판 v2 학습 · INT8 변환 결과: [docs/sign-v2-int8.md](docs/sign-v2-int8.md)
+- 표지판 v3 (실차 배경·red_line 보강, YOLO11/26·320 비교, Pi 기본 가중치): [docs/sign-v3.md](docs/sign-v3.md)
 - 주행 코드에 더한 것: [docs/drive-changes.md](docs/drive-changes.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
