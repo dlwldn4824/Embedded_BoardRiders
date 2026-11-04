@@ -14,7 +14,9 @@ Raspberry Pi 5 한 대로 트랙을 스스로 달리고, 표지판과 신호를 
 |---|---|---|
 | 차선 | LAB 색공간에서 초록 경계 마스크 → 띠 3줄로 도로 중앙 계산 → 상태 판정 → P 제어 | 시뮬레이터 60초 주행, 도로 위 100% |
 | 표지판 | YOLOv8n 10종 → TFLite INT8 | INT8 mAP50 0.957, 크기 3.25 MB |
-| 주행 | 상태 머신 + 표지판 동작(정지 · 신호 · 서행 · 회전 · 도착) | 교차로 좌 · 우 · 직진 3/3, 테스트 15/15 |
+| 주행 | 상태 머신 + 표지판 동작(정지 · 신호 · 서행 · 회전 · 도착) | 교차로 좌 · 우 · 직진 3/3, 테스트 17/17 |
+
+차에 바로 올려 보려면 [라즈베리파이에서 실행하기](#라즈베리파이에서-실행하기)를 따라 하면 됩니다.
 
 ## 발표 자료
 
@@ -212,22 +214,78 @@ v2 모델의 클래스별 mAP50입니다. 막대는 0.80부터 그렸습니다.
 
 그 뒤에는 주행 기록으로 차선 CNN 조향 모델을 학습하고, 지식 증류 → 가지치기 → INT8 순서로 경량화합니다.
 
-## 실행
+## 라즈베리파이에서 실행하기
 
-Pi 5 (64-bit Raspberry Pi OS), 레포 루트에서:
+학습한 표지판 모델은 `weights/sign_v3_8n_int8.tflite` 에 들어 있습니다. 아래 순서대로 하면 차에서 바로 확인할 수 있습니다.
+
+### 1. 설치 (처음 한 번)
+
+Pi 5 (64-bit Raspberry Pi OS) 에서 실행합니다.
 
 ```bash
+git clone https://github.com/dlwldn4824/Embedded_BoardRiders.git 임베디드
+cd 임베디드
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
 pip install ultralytics ai-edge-litert simple-pid gpiozero opencv-python pyyaml
+```
+
+- 카메라 라이브러리(picamera2)는 Pi OS 에 기본으로 들어 있습니다. 그래서 가상환경을 만들 때 `--system-site-packages` 를 꼭 붙입니다.
+- 이미 받아 둔 경우에는 `git pull` 만 하면 됩니다.
+
+### 2. 속도 확인
+
+```bash
+python3 sign/pi_bench.py weights/sign_v3_8n_int8.tflite weights/sign_v3_26n_320_int8.tflite
+```
+
+- 표지판 검출 한 번이 **300ms 이하**여야 합니다. 시뮬레이터에서 이보다 느리면 초록불과 도착선을 놓쳤습니다.
+- 640 모델이 느림으로 나오면 320 모델을 씁니다. 이때 `drive/config.py` 의 `SIGN_IMGSZ` 를 `320` 으로 바꿉니다.
+
+### 3. 표지판 인식 확인 (모터는 움직이지 않습니다)
+
+```bash
+python3 -m drive.sign_check --signs weights/sign_v3_8n_int8.tflite
+```
+
+- 차 앞에 표지판을 하나씩 두고 천천히 가까이 가져옵니다.
+- 화면에 `*** EVENT` 가 나오면 주행 중에 그 표지판에 반응한다는 뜻입니다. 이때 표지판까지의 거리를 적어 둡니다.
+- 검출은 되지만 반응하지 않으면 줄 끝에 이유가 나옵니다. 예를 들어 `멀다 (박스 <40px)` 는 아직 멀다는 뜻입니다.
+- Ctrl+C 로 끝내면 `logs/sign_check_<시각>/` 에 결과가 저장됩니다.
+  - `det/`: 검출 박스를 그린 사진입니다. 초록 박스는 반응하는 검출, 주황 박스는 무시하는 검출입니다.
+  - `raw/`: 원본 사진입니다. 놓친 표지판을 라벨링해서 다시 학습할 때 씁니다.
+  - `summary.txt`: 검출 시간과 클래스별 최대 박스 크기를 정리한 파일입니다.
+
+### 4. 주행
+
+먼저 바퀴를 바닥에서 띄우고 표지판을 보여 주면서 바퀴가 맞게 반응하는지 봅니다. 그다음 트랙에 내려놓고 달립니다.
+
+```bash
 python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite
 ```
 
-표지판 가중치는 `sign_v3_8n_int8.tflite` 가 기본값입니다. 대안과 비교 결과는 [docs/sign-v3.md](docs/sign-v3.md) 에 있습니다.
+`s` 로 출발하고, 스페이스바(또는 아래 방향키)로 비상 정지하고, `q` 로 끝냅니다. 키를 받는 창이 떠야 하므로 Pi 에 모니터를 연결하거나 VNC 로 접속해서 실행합니다.
 
-노트북에서 주행 로직 확인:
+### 5. 실차에서 맞출 값
+
+모두 `drive/config.py` 에 있습니다. 시뮬레이터 값은 출발점일 뿐입니다.
+
+| 증상 | 바꿀 값 |
+|---|---|
+| 직진할 때 한쪽으로 휩니다 | `RIGHT_WHEEL_TRIM` |
+| 교차로에서 너무 일찍 또는 늦게 돕니다 | `TURN_ENTRY_FRAMES`, `TURN_FRAMES` |
+| 표지판에 너무 멀리서 또는 가까이서 반응합니다 | `SIGN_MIN_BOX_H` (3단계에서 적은 박스 크기를 보고 정합니다) |
+| 다른 길의 표지판에 반응합니다 | `SIGN_MIN_BOX_H` 를 올립니다 (시뮬레이터에서는 45 가 맞았습니다) |
+| 도착 정지선을 놓칩니다 | `SIGN_CLASS_RULES["red_line"]` 의 `min_y2` 를 낮춥니다 |
+
+자세한 근거는 [docs/sign-v3.md](docs/sign-v3.md)(모델 비교)와 [docs/sim-signs.md](docs/sim-signs.md)(시뮬레이터 시험)에 있습니다.
+
+### 노트북에서 확인하기
 
 ```bash
-python -m drive.sim --start outer
-python -m drive.sim --start cross --signs mission --sign-latency 0.3   # 가상 표지판 + 검출 지연
+python -m drive.sim --start outer                                      # 차선 주행
+python -m drive.sim --start cross --signs mission --sign-latency 0.3   # 가상 표지판과 검출 지연
+python -m drive.sign_check --signs weights/sign_v3_8n_int8.tflite --input logs/sign_check_<시각>/raw   # Pi 에서 찍은 사진 다시 보기
 python -m pytest tests -q
 ```
 
