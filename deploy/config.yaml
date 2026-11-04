@@ -1,4 +1,4 @@
-# 차량/카메라 설정. 우리 차량에 맞게 핀 번호와 각도를 고칠 것.
+# 차량/카메라 설정.
 
 camera:
   width: 640
@@ -10,37 +10,23 @@ camera:
   exposure_time: null   # us, 예: 8000
   analogue_gain: null   # 예: 2.0
   colour_gains: null    # [red, blue], 예: [1.8, 1.6]
-  hflip: false
-  vflip: false
+  # 카메라가 거꾸로 달려 있다 (drive/config.py FLIP_CODE = -1). 저장 이미지는 바로 세운 상태여야 한다.
+  hflip: true
+  vflip: true
 
+# 차동 구동 (좌우 바퀴 속도 차). 핀은 팀 주행 코드 drive/config.py 와 같은 BCM 번호.
 drive:
-  type: servo           # servo: 서보 조향 + DC 모터 / differential: 좌우 바퀴 속도 차
-  servo:
-    pin: 18
-    center: 90          # 직진 각도. 기존 데이터: 45 = 좌, 90 = 직진
-    range: 45           # steer = ±1 일 때 center ± range
-    invert: false       # 좌우가 반대로 돌면 true
-    min_pulse_width: 0.0005
-    max_pulse_width: 0.0025
-  motor:                # servo 모드의 구동 모터
-    forward: 23
-    backward: 24
-    enable: 12
-  left_motor:           # differential 모드
-    forward: 5
-    backward: 6
-    enable: 13
-  right_motor:
-    forward: 20
-    backward: 21
-    enable: 19
-  differential_gain: 0.8
-  invert_throttle: false
+  left:  {pwm: 18, in1: 22, in2: 27}   # A = 왼쪽 바퀴
+  right: {pwm: 23, in1: 25, in2: 24}   # B = 오른쪽 바퀴
+  pwm_frequency: 100
+  turn_mode: pivot      # pivot: 안쪽 바퀴 감속 / spin: 안쪽 바퀴 역회전까지
+  watchdog_s: 0.5       # 이 시간 동안 명령이 없으면 스스로 정지
 
 collect:
   fps: 15               # 저장 프레임 수. 너무 높으면 거의 같은 프레임만 쌓인다
   jpeg_quality: 92
-  cruise_throttle: 0.35 # 주행 ON 일 때 기본 속도 (0~1)
+  cruise_throttle: 0.35 # 주행 ON 일 때 기본 속도 (drive/config.py BASE_THROTTLE 과 같음)
+  # 안쪽 바퀴 PWM 이 MIN_THROTTLE(0.25) 아래면 바퀴가 서므로, pivot 에서는 |steer| > 0.3 정도부터 안쪽 바퀴가 멈춘다
   bad_mark_seconds: 2.0 # "방금 실수" 버튼이 무효 처리하는 구간
   keyboard_step: 0.12   # 키 한 번에 조향 변화량
   keyboard_decay: 0.85  # 키를 안 누르면 매 프레임 이 비율로 0에 가까워짐

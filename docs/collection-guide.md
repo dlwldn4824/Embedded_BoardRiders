@@ -12,10 +12,13 @@
 sudo apt install -y python3-picamera2 python3-opencv python3-yaml python3-evdev python3-gpiozero python3-lgpio
 ```
 
-1. `deploy/config.yaml` 에서 우리 차량에 맞게 고친다.
-   - `drive.type`: 서보 조향이면 `servo`, 좌우 바퀴 속도 차로 돌면 `differential`.
-   - 핀 번호, 서보 `center`(직진 각도), `range`, `invert`.
-2. 바퀴를 띄운 상태에서 `--input keyboard` 로 좌우 방향과 직진 각도를 확인한다.
+1. `deploy/config.yaml` 은 팀 주행 코드(`drive/config.py`)와 같은 값으로 맞춰 두었다.
+   - 차동 구동: 왼쪽 바퀴 PWMA 18 / AIN1 22 / AIN2 27, 오른쪽 바퀴 PWMB 23 / BIN1 25 / BIN2 24.
+   - 회전 방식은 pivot (안쪽 바퀴 감속). 카메라는 180° 회전(`hflip`, `vflip`).
+   - 조향 라벨 `steer` 와 함께 실제 바퀴 값 `left`, `right` 도 저장한다.
+2. 바퀴를 띄운 상태에서 `--input keyboard` 로 확인한다.
+   - a 를 누르면 **왼쪽 바퀴가 느려져야** 한다. 반대로 움직이면 핀 배선을 확인한다.
+   - 저장된 이미지가 바로 서 있는지 확인한다.
 3. 게임패드 버튼 이름을 확인한다.
    ```bash
    python3 deploy/collect.py --test-input

@@ -4,7 +4,7 @@
 
     data/runs/{run_id}/
         images/000000.jpg ...
-        labels.csv   frame, t, segment, steer, throttle, servo_angle, recovery
+        labels.csv   frame, t, segment, steer, throttle, left, right, recovery
         bad.csv      t_start, t_end   ("방금 실수" 버튼으로 무효 처리한 구간)
         meta.json    방향, 메모, 카메라 고정값, 설정 전체
 
@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class Writer(threading.Thread):
     """디스크 쓰기를 메인 루프와 분리해서 프레임 간격이 흔들리지 않게 한다."""
 
-    FIELDS = ["frame", "t", "segment", "steer", "throttle", "servo_angle", "recovery"]
+    FIELDS = ["frame", "t", "segment", "steer", "throttle", "left", "right", "recovery"]
 
     def __init__(self, run_dir, jpeg_quality):
         super().__init__(daemon=True)
@@ -161,13 +161,12 @@ def main():
                     raise KeyboardInterrupt
 
             throttle = cruise if driving else 0.0
-            car.drive(steer, throttle)
+            left, right = car.drive(steer, throttle)
 
             if recording and driving:  # 정지 상태 프레임은 저장하지 않는다
                 row = {
                     "frame": frame_idx, "t": f"{t:.3f}", "segment": segment, "steer": f"{steer:.4f}",
-                    "throttle": f"{throttle:.3f}",
-                    "servo_angle": "" if car.last_angle is None else f"{car.last_angle:.1f}",
+                    "throttle": f"{throttle:.3f}", "left": f"{left:.3f}", "right": f"{right:.3f}",
                     "recovery": int(recovery),
                 }
                 try:
@@ -187,7 +186,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        car.stop()
+        car.close()
         inp.close()
         writer.close()
         bad_f.close()
