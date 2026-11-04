@@ -3,7 +3,7 @@
 ## 1. 데스크톱에서 할 일
 
 ```bash
-git clone https://github.com/dlwldn4824/embedded.git 임베디드
+git clone https://github.com/dlwldn4824/Embedded_BoardRiders.git 임베디드
 cd 임베디드
 python -m venv .venv
 ```
@@ -36,7 +36,7 @@ python -m pytest tests -q
    이 명령으로 돌린다. docs/drive-changes.md 의 "실차에서 다시 맞춰야 할 값" 도 같이 안내해.
 
 주의:
-- 데이터(data/raw, data/yolo_clean_v2, data/to_label_review)는 레포에 함께 들어 있다.
+- 학습 데이터(data/)는 공개 레포에 없다. 팀 내부에서 data/ 폴더로 복사해 쓴다.
 - 좌우 반전 증강(fliplr)은 끄고 학습한다. right 는 flip_left_to_right.py 로 이미 합성돼 있다.
 - YOLO 데이터(밝은 회색 도로)와 팀 주행 코드가 맞춰진 카메라(어두운 도로)는 색감이 다르다. 실제 차 카메라로 확인이 필요하다.
 ```
@@ -59,13 +59,13 @@ python -m pytest tests -q
 - 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리. INT8 에서 red_line 재현율이 낮다 (conf 0.5 에서 0.53).
 - 차선 CNN 회귀 모델: 규칙 기반 주행 기록(`--record` + CSV `fid`)으로 라벨을 모은 뒤 진행한다.
 
-## 5. 레포에 함께 올라간 데이터
-- `data/yolo_clean_v2/`: 바로 학습할 수 있는 데이터셋. 사람이 검토한 라벨이 모두 들어 있다.
-- `data/to_label_review/`: 라벨이 없던 187장과 검토를 마친 라벨.
-- `data/raw/`: 원본 `yolo_dataset`, 차선 주행 run 2개(`run_20261028_*`).
-- 다시 만들 때:
+## 5. 데이터
+- 학습 데이터는 공개 레포에 넣지 않는다. 팀 내부에서 `data/` 폴더로 복사해 쓴다.
+  - `data/raw/`: 원본 `yolo_dataset`, 차선 주행 run 2개(`run_20261028_*`).
+  - `data/to_label_review/`: 라벨이 없던 187장과 검토를 마친 라벨.
+  - `data/yolo_clean_v2/`: 바로 학습할 수 있는 데이터셋.
+- `data/yolo_clean_v2/` 를 다시 만들 때:
   ```bash
   python sign/clean_dataset.py data/raw/yolo_dataset data/yolo_clean_v2 --extra data/to_label_review
   python sign/flip_left_to_right.py data/yolo_clean_v2
   ```
-- 참고 자료(`data/reference/`)는 올리지 않았다.

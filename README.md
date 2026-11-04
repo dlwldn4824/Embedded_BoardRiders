@@ -81,7 +81,7 @@ sign/      표지판 YOLO 데이터 정리 · 학습 · INT8 변환
 lane/      차선 데이터 점검 (차선 CNN 모델은 다음 단계)
 deploy/    차선 데이터 수집 코드
 weights/   표지판 모델 (sign_v2_int8.tflite 등)
-data/      학습 데이터
+data/      학습 데이터 (공개 레포에는 없음)
 docs/      설계 · 결과 문서, 발표 슬라이드 이미지
 tests/     컨트롤러 · 표지판 필터 테스트
 ```

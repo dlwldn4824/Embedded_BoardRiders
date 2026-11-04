@@ -9,8 +9,5 @@ __pycache__/
 .venv/
 .venv-tf/
 .DS_Store
-!data/yolo_clean_v2/
-!data/raw/
-!data/to_label_review/
 !weights/*.pt
 !weights/*.tflite
