@@ -39,15 +39,14 @@ def main():
 
     # 1) 모든 이미지를 모아서 바이트 중복 제거 (라벨은 train 쪽 우선)
     items, seen = {}, set()
-    unlabeled = []
+    unlabeled = {}   # md5 -> 이미지. 나중에 --extra 에서 라벨이 생기면 빠진다
     for split in ("train", "val"):
         for img in sorted((args.src / "images" / split).iterdir()):
             if img.suffix.lower() not in IMG_EXT:
                 continue
             h = md5(img)
-            if h in seen:
+            if h in seen or h in unlabeled:
                 continue
-            seen.add(h)
             lab = args.src / "labels" / split / f"{img.stem}.txt"
             stem = img.stem if img.stem not in items else f"{img.stem}_{split}"
             if img.stem.startswith("none"):
@@ -55,7 +54,9 @@ def main():
             elif lab.exists():
                 items[stem] = (img, lab)
             else:
-                unlabeled.append(img)
+                unlabeled[h] = img
+                continue
+            seen.add(h)
 
     # 1-1) 추가 데이터: 이미지와 txt 가 같은 폴더에 있는 형식 (labelImg 결과, sign/capture.py 촬영분)
     for extra in args.extra:
@@ -65,13 +66,14 @@ def main():
             h = md5(img)
             if h in seen:
                 continue
-            seen.add(h)
             lab = img.with_suffix(".txt")
+            if not lab.exists():
+                unlabeled.setdefault(h, img)
+                continue
+            seen.add(h)
+            unlabeled.pop(h, None)   # 원본에서 라벨이 없던 이미지를 여기서 라벨링한 경우
             stem = img.stem if img.stem not in items else f"{img.stem}_{extra.name}"
-            if lab.exists():
-                items[stem] = (img, lab)
-            else:
-                unlabeled.append(img)
+            items[stem] = (img, lab)
 
     # 2) {class}_{frame} 을 블록으로 묶어서 블록 단위로 val 배정
     blocks = defaultdict(list)
@@ -111,7 +113,7 @@ def main():
 
     todo = args.dst / "to_label"
     todo.mkdir(parents=True, exist_ok=True)
-    for img in unlabeled:
+    for img in unlabeled.values():
         shutil.copy2(img, todo / img.name)
 
     (args.dst / "data.yaml").write_text(
