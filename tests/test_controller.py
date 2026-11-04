@@ -39,6 +39,26 @@ def test_stop_sign_waits_then_resumes():
     assert acts[-1] == "PID"
 
 
+def test_stop_sign_seen_again_does_not_stop_forever():
+    """표지판이 차 앞에 계속 보여 쿨다운마다 STOP 이 다시 와도, 한 번 서고 나면 출발한다."""
+    c = make()
+    acts = []
+    for i in range(config.STOP_WAIT_FRAMES + config.STOP_IGNORE_FRAMES // 2):
+        if i % config.SIGN_COOLDOWN_FRAMES == 0:
+            c.on_sign(ev("STOP"))
+        acts.append(c.update(LANE, 0.0).action)
+    assert acts[:config.STOP_WAIT_FRAMES - 1] == ["STOP"] * (config.STOP_WAIT_FRAMES - 1)
+    assert acts[-1] == "PID"
+
+
+def test_stop_sign_works_again_after_ignore_window():
+    c = make()
+    c.on_sign(ev("STOP"))
+    run(c, config.STOP_WAIT_FRAMES + config.STOP_IGNORE_FRAMES + 1)
+    c.on_sign(ev("STOP"))   # 다음 정지 표지판
+    assert run(c, 1) == ["STOP"]
+
+
 def test_red_light_holds_until_green():
     c = make()
     c.on_sign(ev("LIGHT", "RED"))

@@ -53,6 +53,7 @@ class Controller:
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
         self._turn = None           # 교차로 회전 진행: [방향, 단계, 단계 프레임]
         self._finish_frames = None  # 정지선을 본 뒤 남은 주행 프레임
+        self._stop_ignore = 0       # 정지 표지판 대기를 마친 뒤 같은 표지판을 무시할 남은 프레임
 
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
@@ -65,7 +66,9 @@ class Controller:
             self.speed_scale = float(ev.value)
             self._speed_frames = cfg.SPEED_FRAMES
         elif ev.kind == "STOP":
-            self._wait = ["STOP", cfg.STOP_WAIT_FRAMES]
+            # 이미 서 있거나 막 출발했으면 같은 표지판을 다시 본 것이다 (차 앞에 그대로 보인다)
+            if not (self._wait and self._wait[0] == "STOP") and self._stop_ignore == 0:
+                self._wait = ["STOP", cfg.STOP_WAIT_FRAMES]
         elif ev.kind == "LIGHT":
             if ev.value == "RED":
                 self._wait = ["RED", cfg.LIGHT_MAX_WAIT_FRAMES]
@@ -141,9 +144,13 @@ class Controller:
             self._speed_frames -= 1
             if self._speed_frames == 0:
                 self.speed_scale = 1.0
+        if self._stop_ignore:
+            self._stop_ignore -= 1
         if self._wait:
             self._wait[1] -= 1
             if self._wait[1] <= 0:
+                if self._wait[0] == "STOP":
+                    self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float]) -> Command:

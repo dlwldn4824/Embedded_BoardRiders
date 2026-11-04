@@ -279,6 +279,13 @@ class Sim:
         self.wheels = (0.0, 0.0)
         self.map_scale = 480 / self.track.shape[0]
         self.map_small = cv2.resize(self.track, (480, 480), interpolation=cv2.INTER_AREA)
+        self.signs = None           # 가상 표지판 (--signs). 없으면 표지판 없이 달린다
+        self.sign_log = []          # (시각, SignEvent)
+        if getattr(args, "signs", None):
+            from drive.sim_signs import SCENARIOS, CameraModel, SimSigns
+            cam = CameraModel(CAM_W, CAM_H, CAM_FOCAL, CAM_PITCH_DEG, CAM_HEIGHT, CAM_FORWARD)
+            self.signs = SimSigns(cfg, cam, SCENARIOS[args.signs], latency_s=args.sign_latency,
+                                  miss=args.sign_miss, seed=args.seed)
 
     # ------------------------------------------------------------ 시뮬레이션 한 단계
     def reset(self, name=None):
@@ -304,6 +311,10 @@ class Sim:
         self.frames.append(self.cam.render(veh.x, veh.y, veh.psi))
         frame = self.frames[0]                     # LATENCY_FRAMES만큼 늦은 프레임
         self.res = self.det.process(frame)
+        if self.signs is not None:   # main.py 와 같은 순서: 표지판 이벤트 먼저, 그다음 ctrl.update
+            for ev in self.signs.step(self.steps, veh.x, veh.y, veh.psi, self.t):
+                self.sign_log.append((self.t, ev))
+                self.ctrl.on_sign(ev)
         prev = self.cmd.action if self.cmd else None
         self.cmd = self.ctrl.update(self.res.state, self.res.error)
         if self.cmd.action in MOVING_ACTIONS:
@@ -327,8 +338,13 @@ class Sim:
     def summary(self):
         pct = 100.0 * self.on_road / max(1, self.steps)
         st = ", ".join(f"{k}={v}" for k, v in self.states.items())
-        return (f"sim {self.t:5.1f}s | 주행 거리 {self.odo / 100:5.2f} m | 도로 위 {pct:5.1f}% | "
-                f"멈춘 횟수 {self.stops} | 상태 {st}")
+        out = (f"sim {self.t:5.1f}s | 주행 거리 {self.odo / 100:5.2f} m | 도로 위 {pct:5.1f}% | "
+               f"멈춘 횟수 {self.stops} | 상태 {st}")
+        if self.signs is not None:
+            evs = " ".join(f"{t:.1f}s:{ev.cls}" for t, ev in self.sign_log)
+            out += (f"\n표지판 이벤트: {evs or '없음'}\n도착(정지선): {'성공' if self.ctrl.finished else '실패'}"
+                    f" | 검출 지연 {self.signs.latency_frames / self.cfg.LOOP_HZ:.2f}s")
+        return out
 
     # ------------------------------------------------------------ 화면
     def _map_pt(self, x, y):
@@ -341,6 +357,13 @@ class Sim:
         if len(self.trail) > 1:
             pts = ((np.array(self.trail) + MARGIN) * PX_PER_CM * self.map_scale).astype(np.int32)
             cv2.polylines(img, [pts], False, (0, 0, 255), 1, cv2.LINE_AA)
+        if self.signs is not None:   # 가상 표지판
+            for s in self.signs.signs:
+                p = self._map_pt(s.x, s.y)
+                cls = s.cls_at(self.t)
+                col = (0, 0, 255) if cls in ("red_light", "stop", "red_line") else (255, 120, 0)
+                cv2.circle(img, p, 4, col, -1, cv2.LINE_AA)
+                _text(img, cls, (p[0] + 5, p[1] - 4), scale=0.35)
         if self.res is not None:   # 띠가 바닥에서 보는 선과 찾은 경계
             sx = CAM_W / self.cfg.PROC_SIZE[0]
             sy = CAM_H / self.cfg.PROC_SIZE[1]
@@ -390,12 +413,25 @@ def parse_args(argv=None):
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
     p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
                    help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
+    p.add_argument("--signs", choices=["mission", "left"],
+                   help="가상 표지판 시나리오 (drive/sim_signs.py). mission 은 --start cross 로")
+    p.add_argument("--sign-latency", type=float, default=0.0,
+                   help="표지판 검출 지연 초 (Pi 의 YOLO 추론 시간). 검출 주기도 이만큼 길어진다")
+    p.add_argument("--sign-miss", type=float, default=0.0, help="프레임마다 표지판을 놓칠 확률")
+    p.add_argument("--seed", type=int, default=0, help="--sign-miss 난수 시드")
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="drive/config.py 값을 이번 실행에서만 바꾼다 (예: --set SIGN_MIN_BOX_H=45). 여러 번 쓸 수 있다")
     return p.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     cfg = config
+    for kv in args.set:
+        key, value = kv.split("=", 1)
+        old = getattr(cfg, key)   # 없는 이름이면 AttributeError 로 바로 알린다
+        setattr(cfg, key, type(old)(value))
+        print(f"config {key}: {old} -> {getattr(cfg, key)}")
     sim = Sim(args, cfg)
     log_path = Path(args.log) if args.log else ROOT / cfg.LOG_DIR / f"sim_{time.strftime('%Y%m%d_%H%M%S')}.csv"
     log = CsvLog(log_path)

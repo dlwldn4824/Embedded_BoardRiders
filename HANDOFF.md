@@ -17,7 +17,7 @@ pip install ultralytics simple-pid gpiozero opencv-python pyyaml pytest
 python -m pytest tests -q
 ```
 
-`pytest` 는 15개가 통과해야 한다.
+`pytest` 는 17개가 통과해야 한다.
 
 ## 2. 데스크톱 Claude 에게 붙여넣을 말
 
@@ -59,6 +59,10 @@ python -m pytest tests -q
   - 대안:
     - red_line 을 자주 놓치면 `sign_v3_26n_int8.tflite` (red_line 재현율 0.82, 대신 1.7배 느림)
     - Pi 가 느리면 `sign_v3_26n_320_int8.tflite` (`SIGN_IMGSZ = 320` 으로 같이 바꿈)
+- **시뮬레이터 가상 표지판 · 검출 지연 시험 (2026-11-05)** → [docs/sim-signs.md](docs/sim-signs.md)
+  - Pi 의 표지판 검출이 **0.3초 이하**여야 미션이 통과한다 (`python -m drive.sim_sweep`).
+  - 정지 표지판 앞 무한 정지 버그를 고쳤다 (`STOP_IGNORE_FRAMES`).
+  - 실차 확인: 이웃 길 표지판이 회전 방향을 덮어쓸 수 있다 (`SIGN_MIN_BOX_H` 40 → 45 검토).
 - `deploy/collect.py`: 차선 수집 코드. 차동 구동이고, 연속 조향을 기록한다. 아직 Pi 에서 돌려 보지 않았다.
 
 ## 4. 아직 안 된 것

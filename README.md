@@ -227,6 +227,7 @@ python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite
 
 ```bash
 python -m drive.sim --start outer
+python -m drive.sim --start cross --signs mission --sign-latency 0.3   # 가상 표지판 + 검출 지연
 python -m pytest tests -q
 ```
 
@@ -248,6 +249,7 @@ tests/     컨트롤러 · 표지판 필터 테스트
 - 표지판 v2 학습 · INT8 변환 결과: [docs/sign-v2-int8.md](docs/sign-v2-int8.md)
 - 표지판 v3 (실차 배경·red_line 보강, YOLO11/26·320 비교, Pi 기본 가중치): [docs/sign-v3.md](docs/sign-v3.md)
 - 주행 코드에 더한 것: [docs/drive-changes.md](docs/drive-changes.md)
+- 시뮬레이터 가상 표지판 · 검출 지연 시험: [docs/sim-signs.md](docs/sim-signs.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
 - 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md)
