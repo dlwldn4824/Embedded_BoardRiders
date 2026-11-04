@@ -9,6 +9,7 @@
 - **다른 PC 에서 이어받기: [HANDOFF.md](HANDOFF.md)**
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
+- 표지판 v2 결과 · INT8 변환 · Pi 실행: [docs/sign-v2-int8.md](docs/sign-v2-int8.md)
 - 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md) (`deploy/collect.py`)
 - 팀 규칙 기반 주행 코드(`drive/`)와 추가한 표지판·교차로 동작: [docs/drive-changes.md](docs/drive-changes.md)
 

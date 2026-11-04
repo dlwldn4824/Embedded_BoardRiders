@@ -48,12 +48,15 @@ python -m pytest tests -q
   - 라벨이 없던 187장은 사전 라벨링한 뒤 사람이 검토했다.
   - 연속 프레임이 train/val 에 섞이지 않도록 블록 단위로 나눴다.
 - `weights/sign_baseline_ep25.pt`: 기준선 모델. 검토 전 데이터로 학습했고, 25 epoch 에서 val mAP50 0.973, mAP50-95 0.737.
+- **v2 학습 + TFLite INT8 (2026-11-05)** → [docs/sign-v2-int8.md](docs/sign-v2-int8.md)
+  - v2: val mAP50 0.971, mAP50-95 0.749 (같은 val 에서 기준선은 0.970 / 0.736).
+  - `weights/sign_v2_int8.tflite`: 3.25MB, mAP50 0.949. Pi 실행: `python3 -m drive.main --mode real --signs weights/sign_v2_int8.tflite`
+  - 변환 `sign/export_int8.py`, 비교 `sign/compare_int8.py`. Windows 에서도 돈다 (`.venv-tf` 따로 만듦).
 - `deploy/collect.py`: 차선 수집 코드. 차동 구동이고, 연속 조향을 기록한다. 아직 Pi 에서 돌려 보지 않았다.
 
 ## 4. 아직 안 된 것
-- v2 학습: 노트북 배터리 때문에 1 epoch 에서 멈췄다. 처음부터 다시 돌린다.
-- TFLite INT8 변환.
-- 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리.
+- Pi 5 에서 INT8 추론 시간 측정 (데스크톱 CPU 에서는 16ms).
+- 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리. INT8 에서 red_line 재현율이 낮다 (conf 0.5 에서 0.53).
 - 차선 CNN 회귀 모델: 규칙 기반 주행 기록(`--record` + CSV `fid`)으로 라벨을 모은 뒤 진행한다.
 
 ## 5. 레포에 함께 올라간 데이터
