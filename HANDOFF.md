@@ -36,7 +36,7 @@ python -m pytest tests -q
    이 명령으로 돌린다. docs/drive-changes.md 의 "실차에서 다시 맞춰야 할 값" 도 같이 안내해.
 
 주의:
-- 학습 데이터는 레포에 없다.
+- 데이터(data/raw, data/yolo_clean_v2, data/to_label_review)는 레포에 함께 들어 있다.
 - 좌우 반전 증강(fliplr)은 끄고 학습한다. right 는 flip_left_to_right.py 로 이미 합성돼 있다.
 - YOLO 데이터(밝은 회색 도로)와 팀 주행 코드가 맞춰진 카메라(어두운 도로)는 색감이 다르다. 실제 차 카메라로 확인이 필요하다.
 ```
