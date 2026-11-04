@@ -32,9 +32,9 @@ def main():
 
     rows = []
     imgs = sorted(p for p in args.src.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"})
-    for res in model.predict([str(p) for p in imgs], conf=args.conf, imgsz=args.imgsz, device=args.device,
-                             stream=True, verbose=False):
-        src = Path(res.path)
+    for src in imgs:
+        # 목록을 한 번에 넘기면 버전에 따라 res.path 가 image0.jpg 처럼 바뀌므로 한 장씩 넘긴다
+        res = model.predict(str(src), conf=args.conf, imgsz=args.imgsz, device=args.device, verbose=False)[0]
         shutil.copy2(src, args.dst / src.name)
         lines, found = [], []
         for c, xywhn, cf in zip(res.boxes.cls.tolist(), res.boxes.xywhn.tolist(), res.boxes.conf.tolist()):
