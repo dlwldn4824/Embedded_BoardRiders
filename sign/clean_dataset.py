@@ -7,6 +7,8 @@
 
 사용법:
     python sign/clean_dataset.py data/raw/yolo_dataset data/yolo_clean
+    python sign/clean_dataset.py data/raw/yolo_dataset data/yolo_clean --extra data/to_label_review data/sign_capture
+    python sign/flip_left_to_right.py data/yolo_clean   # 재분할 후 다시 실행
 """
 import argparse
 import hashlib
@@ -29,6 +31,8 @@ def main():
     ap.add_argument("--block", type=int, default=40, help="연속 프레임을 묶는 블록 크기")
     ap.add_argument("--val-ratio", type=float, default=0.2)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--extra", type=Path, nargs="*", default=[],
+                    help="라벨링을 마친 추가 폴더 (이미지와 txt 가 같은 폴더)")
     args = ap.parse_args()
 
     names = (args.src / "labels/train/classes.txt").read_text().split()
@@ -49,6 +53,22 @@ def main():
             if img.stem.startswith("none"):
                 items[stem] = (img, None)  # 진짜 배경 이미지
             elif lab.exists():
+                items[stem] = (img, lab)
+            else:
+                unlabeled.append(img)
+
+    # 1-1) 추가 데이터: 이미지와 txt 가 같은 폴더에 있는 형식 (labelImg 결과, sign/capture.py 촬영분)
+    for extra in args.extra:
+        for img in sorted(extra.iterdir()):
+            if img.suffix.lower() not in IMG_EXT:
+                continue
+            h = md5(img)
+            if h in seen:
+                continue
+            seen.add(h)
+            lab = img.with_suffix(".txt")
+            stem = img.stem if img.stem not in items else f"{img.stem}_{extra.name}"
+            if lab.exists():
                 items[stem] = (img, lab)
             else:
                 unlabeled.append(img)
