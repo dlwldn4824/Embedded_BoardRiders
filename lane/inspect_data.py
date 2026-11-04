@@ -59,15 +59,42 @@ def montage(frames, out_path, per_angle=6, width=240):
     cv2.imwrite(str(out_path), np.vstack(rows))
 
 
+def inspect_new_runs(runs):
+    """deploy/collect.py 형식 (labels.csv + meta.json) 점검."""
+    import csv
+    import json
+
+    for run in runs:
+        rows = list(csv.DictReader(open(run / "labels.csv")))
+        meta = json.loads((run / "meta.json").read_text())
+        bad = [(float(a), float(b)) for a, b in list(csv.reader(open(run / "bad.csv")))[1:]]
+        t = np.array([float(r["t"]) for r in rows])
+        s = np.array([float(r["steer"]) for r in rows])
+        is_bad = np.zeros(len(rows), bool)
+        for a, b in bad:
+            is_bad |= (t >= a) & (t <= b)
+        hist, _ = np.histogram(s[~is_bad], bins=[-1, -0.6, -0.2, 0.2, 0.6, 1.0001])
+        print(f"\n== {run.name}  방향 {meta['direction']}  메모 '{meta['note']}'")
+        print(f"  {len(rows)}장, 무효 {is_bad.sum()}장, 복구 태그 {np.mean([r['recovery'] == '1' for r in rows]):.0%}, "
+              f"실제 fps {len(rows) / max(1e-6, t[-1] - t[0]):.1f}" if rows else "  프레임 없음")
+        print("  조향 분포 (강좌/약좌/직진/약우/강우):", hist.tolist())
+        print("  카메라 고정값:", meta.get("camera_locked"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("root", type=Path)
     ap.add_argument("--out", type=Path, default=Path("docs/data_report"))
     args = ap.parse_args()
 
+    new_runs = sorted(p.parent for p in args.root.rglob("labels.csv"))
+    if new_runs:
+        inspect_new_runs(new_runs)
     runs = sorted({p.parent for p in args.root.rglob("train_*.png")})
     if not runs:
-        sys.exit(f"{args.root} 아래에 train_*.png 가 없습니다")
+        if new_runs:
+            return
+        sys.exit(f"{args.root} 아래에 train_*.png 나 labels.csv 가 없습니다")
     args.out.mkdir(parents=True, exist_ok=True)
 
     total = Counter()

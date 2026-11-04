@@ -1,0 +1,11 @@
+# Raspberry Pi OS (Bookworm) 에서:
+#   sudo apt install -y python3-picamera2 python3-opencv python3-yaml python3-evdev python3-gpiozero python3-lgpio
+# venv 를 쓸 때는 picamera2 때문에 --system-site-packages 로 만든다:
+#   python3 -m venv --system-site-packages .venv
+picamera2
+opencv-python
+pyyaml
+evdev
+gpiozero
+lgpio
+numpy

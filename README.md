@@ -6,7 +6,9 @@
 - 표지판: YOLOv8n → TFLite INT8
 - 주행: FSM + 후처리 제어
 
-학습 방향 설계는 [docs/training-plan.md](docs/training-plan.md) 참고.
+- 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
+- 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
+- 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md) (`deploy/collect.py`)
 
 ## 구조
 

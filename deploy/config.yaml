@@ -1,0 +1,56 @@
+# 차량/카메라 설정. 우리 차량에 맞게 핀 번호와 각도를 고칠 것.
+
+camera:
+  width: 640
+  height: 480
+  # 노출/화이트밸런스를 고정해야 run마다, 그리고 YOLO 데이터와 색감이 같아진다.
+  # null 이면 시작할 때 2초 자동 조정 후 그 값으로 고정하고 meta.json 에 기록한다.
+  # 한 번 정한 값을 여기에 적어 두고 계속 같은 값으로 수집할 것.
+  lock_exposure: true
+  exposure_time: null   # us, 예: 8000
+  analogue_gain: null   # 예: 2.0
+  colour_gains: null    # [red, blue], 예: [1.8, 1.6]
+  hflip: false
+  vflip: false
+
+drive:
+  type: servo           # servo: 서보 조향 + DC 모터 / differential: 좌우 바퀴 속도 차
+  servo:
+    pin: 18
+    center: 90          # 직진 각도. 기존 데이터: 45 = 좌, 90 = 직진
+    range: 45           # steer = ±1 일 때 center ± range
+    invert: false       # 좌우가 반대로 돌면 true
+    min_pulse_width: 0.0005
+    max_pulse_width: 0.0025
+  motor:                # servo 모드의 구동 모터
+    forward: 23
+    backward: 24
+    enable: 12
+  left_motor:           # differential 모드
+    forward: 5
+    backward: 6
+    enable: 13
+  right_motor:
+    forward: 20
+    backward: 21
+    enable: 19
+  differential_gain: 0.8
+  invert_throttle: false
+
+collect:
+  fps: 15               # 저장 프레임 수. 너무 높으면 거의 같은 프레임만 쌓인다
+  jpeg_quality: 92
+  cruise_throttle: 0.35 # 주행 ON 일 때 기본 속도 (0~1)
+  bad_mark_seconds: 2.0 # "방금 실수" 버튼이 무효 처리하는 구간
+  keyboard_step: 0.12   # 키 한 번에 조향 변화량
+  keyboard_decay: 0.85  # 키를 안 누르면 매 프레임 이 비율로 0에 가까워짐
+  # 게임패드 버튼 이름은 패드마다 다르다. `python deploy/collect.py --test-input` 으로 확인 후 고칠 것.
+  gamepad:
+    steer_axis: ABS_X
+    deadzone: 0.04
+    record: BTN_SOUTH   # 녹화 시작/정지
+    drive: BTN_TR       # 주행 ON/OFF (cruise_throttle 로 전진)
+    recovery: BTN_WEST  # 복구 주행 태그 ON/OFF
+    bad: BTN_NORTH      # 직전 bad_mark_seconds 무효 처리
+    estop: BTN_EAST     # 즉시 정지 (주행·녹화 모두 OFF)
+    quit: BTN_START
