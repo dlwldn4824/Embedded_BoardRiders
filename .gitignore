@@ -1,0 +1,10 @@
+data/*
+!data/.gitkeep
+*.tflite
+*.pt
+*.h5
+*.keras
+runs/
+__pycache__/
+.venv/
+.DS_Store
