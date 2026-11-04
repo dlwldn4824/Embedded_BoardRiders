@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", type=Path, default=ROOT / "data/yolo_clean/data.yaml")
+    ap.add_argument("--data", type=Path, default=ROOT / "data/yolo_clean_v2/data.yaml")
     ap.add_argument("--model", default="yolov8n.pt")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--epochs", type=int, default=60)

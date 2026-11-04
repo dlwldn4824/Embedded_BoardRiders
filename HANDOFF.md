@@ -1,0 +1,62 @@
+# 데스크톱 이어받기 (2026-11-04 기준)
+
+## 1. 데스크톱에서 할 일
+
+```bash
+git clone https://github.com/dlwldn4824/embedded.git 임베디드
+cd 임베디드
+python -m venv .venv
+```
+
+활성화한 뒤 패키지를 설치한다.
+- Windows: `.venv\Scripts\activate`
+- Mac/Linux: `source .venv/bin/activate`
+
+```bash
+pip install ultralytics simple-pid gpiozero opencv-python pyyaml pytest
+python -m pytest tests -q
+```
+
+`pytest` 는 15개가 통과해야 한다.
+
+## 2. 데스크톱 Claude 에게 붙여넣을 말
+
+```
+이 레포(임베디드)는 광운대 임베디드 AI 최적화 과목 Raspberry Pi 5 자율주행 프로젝트야.
+먼저 HANDOFF.md, README.md, docs/drive-changes.md, docs/data-report.md 를 읽고 현재 상태를 파악해줘.
+
+이어서 할 일:
+1. data/yolo_clean_v2 로 YOLOv8n 표지판 모델을 학습해 (v2).
+   python sign/train.py --name v2 --epochs 40 --device 0   (NVIDIA GPU 없으면 --device cpu)
+   끝나면 클래스별 P/R/mAP50 표를 정리하고, weights/sign_baseline_ep25.pt (기준선) 와 같은 val 로 비교해.
+2. v2 best.pt 를 Pi 용 TFLite INT8 로 변환해 (representative 데이터는 train 이미지 일부).
+   FP32 대비 크기, mAP50, CPU 추론 시간을 표로 남겨. 결과 가중치는 weights/ 에 넣고 커밋해.
+3. 팀원이 Pi 에서 바로 돌릴 수 있게 실행 방법을 정리해:
+   python3 -m drive.main --mode real --signs weights/<int8 파일>
+   이 명령으로 돌린다. docs/drive-changes.md 의 "실차에서 다시 맞춰야 할 값" 도 같이 안내해.
+
+주의:
+- 학습 데이터는 레포에 없다.
+- 좌우 반전 증강(fliplr)은 끄고 학습한다. right 는 flip_left_to_right.py 로 이미 합성돼 있다.
+- YOLO 데이터(밝은 회색 도로)와 팀 주행 코드가 맞춰진 카메라(어두운 도로)는 색감이 다르다. 실제 차 카메라로 확인이 필요하다.
+```
+
+## 3. 지금까지 된 것
+- `drive/`: 팀 규칙 기반 주행 코드에 YOLO 표지판 연결, 교차로 회전, 정지·신호등·서행·도착 동작을 추가했다. sim 과 테스트로 확인했다. → [docs/drive-changes.md](docs/drive-changes.md)
+- `data/yolo_clean_v2/`: 학습용 데이터셋. 고유 이미지 1779장, train 1420 + 반전 right 153, val 359.
+  - 원본 val 의 80% 가 train 과 같은 이미지였던 문제를 고쳤다.
+  - 라벨이 없던 187장은 사전 라벨링한 뒤 사람이 검토했다.
+  - 연속 프레임이 train/val 에 섞이지 않도록 블록 단위로 나눴다.
+- `weights/sign_baseline_ep25.pt`: 기준선 모델. 검토 전 데이터로 학습했고, 25 epoch 에서 val mAP50 0.973, mAP50-95 0.737.
+- `deploy/collect.py`: 차선 수집 코드. 차동 구동이고, 연속 조향을 기록한다. 아직 Pi 에서 돌려 보지 않았다.
+
+## 4. 아직 안 된 것
+- v2 학습: 노트북 배터리 때문에 1 epoch 에서 멈췄다. 처음부터 다시 돌린다.
+- TFLite INT8 변환.
+- 실차 확인: 카메라 색감, 교차로 타이밍, 표지판 반응 거리.
+- 차선 CNN 회귀 모델: 규칙 기반 주행 기록(`--record` + CSV `fid`)으로 라벨을 모은 뒤 진행한다.
+
+## 5. 라벨 원본
+- 사람이 검토한 라벨은 모두 `data/yolo_clean_v2/labels/` 에 들어 있다.
+- `data/yolo_clean_v2` 는 원본 `yolo_dataset.zip` 에 노트북에서 검토한 라벨을 합쳐 만든 것이다.
+  다시 만들 일이 있으면 원본 zip 과 `sign/clean_dataset.py --extra` 가 필요하다. 검토 폴더 `data/to_label_review` 는 노트북에만 있다.

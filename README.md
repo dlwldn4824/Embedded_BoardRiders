@@ -6,6 +6,7 @@
 - 표지판: YOLOv8n → TFLite INT8
 - 주행: FSM + 후처리 제어
 
+- **다른 PC 에서 이어받기: [HANDOFF.md](HANDOFF.md)**
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
 - 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md) (`deploy/collect.py`)

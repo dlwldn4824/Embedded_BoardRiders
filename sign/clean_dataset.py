@@ -116,8 +116,9 @@ def main():
     for img in unlabeled.values():
         shutil.copy2(img, todo / img.name)
 
+    # path 를 쓰지 않으면 ultralytics 가 data.yaml 이 있는 폴더를 기준으로 삼는다 (다른 PC 로 옮겨도 동작)
     (args.dst / "data.yaml").write_text(
-        f"path: {args.dst.resolve()}\ntrain: images/train\nval: images/val\n\nnc: {len(names)}\nnames:\n"
+        f"train: images/train\nval: images/val\n\nnc: {len(names)}\nnames:\n"
         + "".join(f"  - {n}\n" for n in names)
     )
     print(f"고유 이미지 {len(items)}장 → train {count['train']}, val {count['val']}")
