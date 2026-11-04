@@ -1,4 +1,4 @@
-"""PID 조향, 속도 계산, 상태별 동작, 표지판 이벤트 받는 자리.
+"""PID 조향, 속도 계산, 상태별 동작, 표지판 이벤트 처리 (교차로 회전, 정지, 신호등, 정지선).
 
 PID 사용 방식은 Donkeycar LineFollower (donkeycar/parts/line_follower.py,
 https://github.com/autorope/donkeycar)를 참고했다.
@@ -29,7 +29,7 @@ def clamp(x, lo, hi):
 class Command:
     throttle: float = 0.0
     steering: float = 0.0
-    action: str = "STOP"   # PID / CROSS / STOP / PAUSE
+    action: str = "STOP"   # PID / CROSS / TURN (움직임) | STOP / PAUSE / RED / FINISH (정지)
     horn: bool = False
 
 
@@ -44,27 +44,50 @@ class Controller:
         self.running = False        # 시작은 항상 정지 상태
         self.pending_turn = None    # 표지판으로 받은, 다음 교차로에서 실행할 방향
         self.speed_scale = 1.0      # 서행 표지판 속도 배율
+        self.finished = False       # 정지선 도착. set_running(True)로 다시 출발할 때까지 정지
         self._horn_frames = 0
         self._cross_frames = 0
         self._last_action = None
+        self._run_frames = 0        # 출발 후 프레임 수 (출발 지점 정지선 무시용)
+        self._speed_frames = 0
+        self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
+        self._turn = None           # 교차로 회전 진행: [방향, 단계, 단계 프레임]
+        self._finish_frames = None  # 정지선을 본 뒤 남은 주행 프레임
 
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
+        cfg = self.cfg
         if ev.kind == "TURN":
             self.pending_turn = ev.value
         elif ev.kind == "HORN":
-            self._horn_frames = self.cfg.HORN_FRAMES
+            self._horn_frames = cfg.HORN_FRAMES
         elif ev.kind == "SPEED":
             self.speed_scale = float(ev.value)
+            self._speed_frames = cfg.SPEED_FRAMES
+        elif ev.kind == "STOP":
+            self._wait = ["STOP", cfg.STOP_WAIT_FRAMES]
+        elif ev.kind == "LIGHT":
+            if ev.value == "RED":
+                self._wait = ["RED", cfg.LIGHT_MAX_WAIT_FRAMES]
+            elif self._wait and self._wait[0] == "RED":
+                self._wait = None   # 초록불: 바로 출발
+        elif ev.kind == "FINISH":
+            if self._run_frames >= cfg.FINISH_ARM_FRAMES and self._finish_frames is None:
+                self._finish_frames = cfg.FINISH_DELAY_FRAMES
 
     # ------------------------------------------------------------ 주행 시작/정지
     def set_running(self, on):
         self.running = on
         self.pid.reset()
+        if on and self.finished:
+            self.finished = False
+            self._finish_frames = None
+            self._run_frames = 0
 
     def reset(self):
         self.pid.reset()
         self._cross_frames = 0
+        self._turn = None
 
     # ------------------------------------------------------------ 매 프레임
     def throttle_for(self, steering):
@@ -72,35 +95,91 @@ class Controller:
         t = cfg.BASE_THROTTLE * self.speed_scale * (1.0 - cfg.SLOW_K * abs(steering))
         return clamp(t, cfg.MIN_THROTTLE, cfg.MAX_THROTTLE)
 
+    def _slow(self, throttle):
+        return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
+
+    def _start_turn(self, direction):
+        self._turn = [direction, "ENTRY", 0]
+        self.pending_turn = None
+
+    def _turning(self, state):
+        """교차로 회전. 비전이 교차로 안에서 믿을 수 없으므로 시간 기반으로 돈다.
+        ENTRY: 교차로 안쪽까지 직진 -> SPIN: 한쪽 바퀴 위주로 회전 -> EXIT: 차선이 다시 보일 때까지 서행 직진."""
+        cfg = self.cfg
+        direction, phase, n = self._turn
+        self._turn[2] += 1
+        if phase == "ENTRY":
+            if n + 1 >= cfg.TURN_ENTRY_FRAMES:
+                self._turn[1:] = ["SPIN", 0]
+            return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
+        if phase == "SPIN":
+            if n + 1 >= cfg.TURN_FRAMES:
+                self._turn[1:] = ["EXIT", 0]
+            s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
+            return Command(throttle=self._slow(cfg.TURN_THROTTLE), steering=s, action="TURN")
+        # EXIT
+        if state in PID_STATES:
+            self._turn = None
+            return None   # 차선을 다시 잡았다 -> 이번 프레임부터 PID
+        if n >= cfg.TURN_EXIT_MAX_FRAMES:
+            self._turn = None
+            return Command(action="STOP")
+        return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
+
     def _intersection(self):
-        # TODO(YOLO): self.pending_turn(LEFT/STRAIGHT/RIGHT)에 따라 회전 동작을 넣는다.
-        # 지금은 감속 직진만 하다가 INTERSECTION_MAX_FRAMES를 넘으면 정지한다.
+        if self.pending_turn in ("LEFT", "RIGHT"):
+            self._start_turn(self.pending_turn)
+            return self._turning(INTERSECTION)
+        # 직진 표지판 또는 표지판 없음: 감속 직진, INTERSECTION_MAX_FRAMES를 넘으면 정지
         self._cross_frames += 1
         if self._cross_frames > self.cfg.INTERSECTION_MAX_FRAMES:
             return Command(action="STOP")
-        t = clamp(self.cfg.INTERSECTION_THROTTLE * self.speed_scale,
-                  self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
-        return Command(throttle=t, steering=0.0, action="CROSS")
+        return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
+
+    def _tick_timers(self):
+        if self._speed_frames:
+            self._speed_frames -= 1
+            if self._speed_frames == 0:
+                self.speed_scale = 1.0
+        if self._wait:
+            self._wait[1] -= 1
+            if self._wait[1] <= 0:
+                self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float]) -> Command:
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1
-
+        cmd = None
         if not self.running:
             cmd = Command(action="PAUSE")
-        elif state in PID_STATES and error is not None:
-            if self._last_action != "PID":
-                self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
-            steering = float(self.pid(-error, dt=self.dt))
-            cmd = Command(throttle=self.throttle_for(steering), steering=steering, action="PID")
-        elif state == INTERSECTION:
-            cmd = self._intersection()
+        elif self.finished:
+            cmd = Command(action="FINISH")
+        elif self._wait:
+            self._tick_timers()
+            cmd = Command(action=self._wait[0] if self._wait else "STOP")
         else:
-            # OFF_ROAD, LOST, 상태 없음, 또는 이번 프레임에 도로 중앙이 없음 -> 즉시 정지
-            cmd = Command(action="STOP")
-
-        if state != INTERSECTION:
+            self._run_frames += 1
+            self._tick_timers()
+            if self._finish_frames is not None:
+                self._finish_frames -= 1
+                if self._finish_frames < 0:
+                    self.finished = True
+                    cmd = Command(action="FINISH")
+            if cmd is None and self._turn is not None:
+                cmd = self._turning(state)
+            if cmd is None:
+                if state in PID_STATES and error is not None:
+                    if self._last_action != "PID":
+                        self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
+                    steering = float(self.pid(-error, dt=self.dt))
+                    cmd = Command(throttle=self.throttle_for(steering), steering=steering, action="PID")
+                elif state == INTERSECTION:
+                    cmd = self._intersection()
+                else:
+                    # OFF_ROAD, LOST, 상태 없음, 또는 이번 프레임에 도로 중앙이 없음 -> 즉시 정지
+                    cmd = Command(action="STOP")
+        if state != INTERSECTION and self._turn is None:
             if self._cross_frames:
                 self.pending_turn = None  # 교차로를 지나면 저장한 방향을 비운다
             self._cross_frames = 0

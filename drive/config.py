@@ -56,30 +56,61 @@ SLOW_K = 0.5                  # 조향이 클수록 감속: BASE * (1 - SLOW_K *
 MIN_THROTTLE = 0.25
 MAX_THROTTLE = 0.5
 INTERSECTION_THROTTLE = 0.28  # 교차로 감속 직진 속도
-INTERSECTION_MAX_FRAMES = 20  # 감속 직진 최대 프레임 수, 넘으면 정지 (YOLO 연결 전 임시)
+INTERSECTION_MAX_FRAMES = 80   # 감속 직진 최대 프레임 수, 넘으면 정지 (sim: 교차로 통과에 약 60프레임)
 
 # ---------------------------------------------------------------- 모터 / 부저 (gpiozero BCM 번호)
 PWMA, AIN1, AIN2 = 18, 22, 27   # A = 왼쪽 바퀴
 PWMB, BIN1, BIN2 = 23, 25, 24   # B = 오른쪽 바퀴
 PWM_FREQUENCY = 100             # gpiozero PWMOutputDevice 기본값
 TURN_MODE = "pivot"             # 'pivot': 안쪽 바퀴 감속 / 'spin': 안쪽 바퀴 역회전까지
+# 오른쪽 바퀴 PWM 배율. 바닥에 놓고 감속 직진(INTERSECTION_THROTTLE)을 2m 시켜 봤을 때
+# 오른쪽으로 휘면 올리고 왼쪽으로 휘면 내린다 (데드밴드 때문에 1/세기비 보다 작은 값이 맞다).
+# sim: 좌우 차 8% 안은 보정 없이 교차로 통과, 15% 차는 1.03~1.09 로 보정하면 통과.
+RIGHT_WHEEL_TRIM = 1.0
 MOTOR_WATCHDOG_S = 0.5          # 이 시간 동안 모터 명령이 없으면 스스로 정지
 BUZZER_PIN = 12
 HORN_TONE_HZ = 440              # TonalBuzzer 기본 음역(220~880Hz) 안의 값
 HORN_FRAMES = 6                 # 경적 표지판 하나에 울리는 프레임 수
 
-# ---------------------------------------------------------------- 표지판 (YOLO 연결 지점)
-# 검출 클래스 이름 -> (이벤트 종류, 값). 클래스 이름은 YOLO 모델에 맞춰 바꾼다.
+# ---------------------------------------------------------------- 표지판 (YOLO)
+# 검출 클래스 이름 -> (이벤트 종류, 값). 클래스 이름은 sign/ 의 YOLO 데이터셋(10 클래스)과 같다.
+# crosswalk 는 이벤트를 만들지 않는다 (신호등과 함께 보이므로 신호등 이벤트로 충분).
 SIGN_CLASS_EVENTS = {
     "left": ("TURN", "LEFT"),
     "straight": ("TURN", "STRAIGHT"),
     "right": ("TURN", "RIGHT"),
     "horn": ("HORN", None),
-    "slow": ("SPEED", 0.6),
+    "speed_20": ("SPEED", 0.6),
+    "stop": ("STOP", None),
+    "red_light": ("LIGHT", "RED"),
+    "green_light": ("LIGHT", "GREEN"),
+    "red_line": ("FINISH", None),
 }
+# 박스 기준은 검출기 입력(바로 세운 640x480) 픽셀. 실제 트랙에서 반드시 다시 잰다.
 SIGN_MIN_CONF = 0.5
 SIGN_MIN_BOX_H = 40             # 박스가 이 높이(px) 이상일 때만 (충분히 가까울 때만) 반응
+SIGN_CLASS_RULES = {            # 클래스별로 다르게 둘 값만 적는다 (min_conf, min_h, min_y2)
+    "red_line": {"min_h": 0, "min_y2": 380},    # 납작한 선이라 높이 대신 화면 아래쪽까지 왔는지로 판단
+    "red_light": {"min_h": 60},
+    "green_light": {"min_h": 60},
+}
+SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레임 안에서 이만큼 검출돼야 이벤트
+SIGN_CONFIRM_WINDOW = 15
 SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까지 기다릴 프레임 수
+SIGN_IMGSZ = 640                # YOLO 입력 크기 (학습과 같게)
+
+# ---------------------------------------------------------------- 표지판 동작 (LOOP_HZ 프레임 단위)
+SPEED_FRAMES = 120              # 서행 표지판 후 감속 유지 (6초)
+STOP_WAIT_FRAMES = 60           # 정지 표지판 앞 정지 (3초)
+LIGHT_MAX_WAIT_FRAMES = 400     # 빨간불 최대 대기 (20초). 초록불을 못 보더라도 멈춰 있지 않게
+FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선을 무시 (출발 지점의 선)
+FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
+# 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
+TURN_ENTRY_FRAMES = 40
+TURN_FRAMES = 20
+TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
+TURN_THROTTLE = 0.4
+TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
 
 # ---------------------------------------------------------------- 화면 / 기록
 DISPLAY_SCALE = 2               # 오버레이 창 확대 배율

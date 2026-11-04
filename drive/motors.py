@@ -109,7 +109,9 @@ class Car:
         return self.wheels
 
     def drive(self, throttle, steering):
-        return self.set_wheels(*mix(throttle, steering, self.turn_mode))
+        left, right = mix(throttle, steering, self.turn_mode)
+        # 좌우 모터 세기 차 보정. 교차로 직진/회전은 시간 기반이라 차가 한쪽으로 휘면 실패한다.
+        return self.set_wheels(left, right * getattr(self.cfg, "RIGHT_WHEEL_TRIM", 1.0))
 
     def stop(self):
         with self._lock:

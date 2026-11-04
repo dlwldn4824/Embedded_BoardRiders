@@ -320,7 +320,7 @@ class Sim:
         self.trail.append((veh.x, veh.y))
         del self.trail[:-3000]
         if log:
-            log.write(self.t, self.res, self.cmd, self.wheels)
+            log.write(self.t, self.res, self.cmd, self.wheels, self.steps)
         if recorder:
             recorder.put(self.steps, frame)
 
@@ -388,6 +388,8 @@ def parse_args(argv=None):
     p.add_argument("--show-mask", action="store_true", help="녹색 마스크 창도 띄움")
     p.add_argument("--record", metavar="DIR", help="가상 카메라 프레임 저장 (offline/tune으로 다시 보기)")
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
+    p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
+                   help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
     return p.parse_args(argv)
 
 
@@ -400,6 +402,8 @@ def main(argv=None):
     recorder = Recorder(args.record) if args.record else None
     if args.no_gui or args.autostart:
         sim.ctrl.set_running(True)
+    if args.turn:
+        sim.ctrl.pending_turn = args.turn
 
     try:
         if args.no_gui:

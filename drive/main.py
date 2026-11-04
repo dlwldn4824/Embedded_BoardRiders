@@ -4,6 +4,7 @@
   python3 -m drive.main --mode dry                         # Pi: 카메라만, 모터 없음
   python  -m drive.main --mode offline --input docs/samples --repeat 5
   python  -m drive.main --mode offline --input run_20261028_190928
+  python3 -m drive.main --mode real --signs runs/sign/baseline/weights/best.pt   # 표지판 포함
 
 저장된 이미지/동영상은 이미 바로 세운 것으로 본다 (수집 코드와 --record 모두 flip 후 저장).
 카메라 원본(거꾸로)을 offline으로 볼 때만 --flip을 붙인다.
@@ -36,7 +37,7 @@ from drive.signs import NullSignDetector, SignInterpreter, SignWorker
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
-MOVING_ACTIONS = ("PID", "CROSS")
+MOVING_ACTIONS = ("PID", "CROSS", "TURN")
 
 
 # ================================================================ 프레임 입력
@@ -196,7 +197,8 @@ class Recorder(threading.Thread):
 
 # ================================================================ 로그
 class CsvLog:
-    FIELDS = ["t", "state", "error", "steering", "throttle", "left", "right", "edges_found",
+    # fid: --record 로 저장한 이미지 파일 이름({fid:06d}.jpg)과 같은 번호. 이미지와 조향값을 짝짓는 데 쓴다.
+    FIELDS = ["fid", "t", "state", "error", "steering", "throttle", "left", "right", "edges_found",
               "raw_state", "action"]
 
     def __init__(self, path):
@@ -207,9 +209,9 @@ class CsvLog:
         self.w.writerow(self.FIELDS)
         self.n = 0
 
-    def write(self, t, res, cmd, wheels):
+    def write(self, t, res, cmd, wheels, fid=None):
         f3 = lambda x: "" if x is None else f"{x:.3f}"  # noqa: E731
-        self.w.writerow([f"{t:.3f}", res.state or "", f3(res.error), f3(cmd.steering),
+        self.w.writerow(["" if fid is None else fid, f"{t:.3f}", res.state or "", f3(res.error), f3(cmd.steering),
                          f3(cmd.throttle), f3(wheels[0]), f3(wheels[1]), res.edges_found,
                          res.candidate or "", cmd.action])
         self.n += 1
@@ -323,6 +325,8 @@ def parse_args(argv=None):
     p.add_argument("--show-mask", action="store_true", help="녹색 마스크 창도 띄움")
     p.add_argument("--record", metavar="DIR", help="real/dry: flip한 카메라 프레임 저장")
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/run_<시각>_<모드>.csv)")
+    p.add_argument("--signs", metavar="WEIGHTS",
+                   help="표지판 YOLO 가중치 (.pt/.onnx/.tflite). 없으면 표지판을 보지 않는다")
     a = p.parse_args(argv)
     if a.mode == "offline" and not a.input:
         p.error("offline 모드는 --input이 필요하다")
@@ -373,7 +377,7 @@ class Runner:
             self.wheels = car.stop()
         car.horn(self.cmd.horn)
 
-        self.log.write(t, res, self.cmd, self.wheels)
+        self.log.write(t, res, self.cmd, self.wheels, frame.fid)
         self.states[res.state] += 1
         if self.recorder:
             self.recorder.put(frame.fid, upright)
@@ -403,6 +407,10 @@ class Runner:
         extra = []
         if ctrl.pending_turn:
             extra.append(f"next turn: {ctrl.pending_turn}")
+        if ctrl._turn:
+            extra.append(f"turn {ctrl._turn[0]} {ctrl._turn[1]}")
+        if ctrl._wait:
+            extra.append(f"wait {ctrl._wait[0]} {ctrl._wait[1]}")
         if ctrl.speed_scale != 1.0:
             extra.append(f"speed x{ctrl.speed_scale:.2f}")
         if self.offline and self.playback_paused:
@@ -493,7 +501,13 @@ def main(argv=None):
             source = OfflineSource(args.input, args.repeat)
         else:
             source = CameraSource(cfg)
-        signs = SignWorker(NullSignDetector(), SignInterpreter(cfg))
+        detector = NullSignDetector()
+        if args.signs:
+            from drive.signs import YoloSignDetector
+
+            detector = YoloSignDetector(args.signs, imgsz=cfg.SIGN_IMGSZ)
+            print(f"표지판 검출기: {args.signs}")
+        signs = SignWorker(detector, SignInterpreter(cfg))
         signs.start()
         if args.record and args.mode != "offline":
             recorder = Recorder(args.record)

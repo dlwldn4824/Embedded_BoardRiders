@@ -179,6 +179,10 @@ class LaneDetector:
             return OFF_ROAD
         valid = [b for b in bands if b.center is not None]
         if not valid:
+            # 교차로 안: 모든 띠를 정상적으로 훑었는데 양쪽 다 녹색 경계가 없다 (도로가 사방으로 열림).
+            # 교차로에 들어갈 때는 먼 띠부터 열리므로, 가까운 띠까지 열리는 순간 여기로 온다.
+            if all(b.edges == "--" and not b.note for b in bands):
+                return INTERSECTION
             return None
         if near.wide or (near.edges == "--" and not near.note):
             # 가까운 띠는 양쪽이 열렸는데 먼 띠는 도로가 보인다 -> 교차로
