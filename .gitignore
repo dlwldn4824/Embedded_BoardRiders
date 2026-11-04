@@ -8,3 +8,4 @@ runs/
 __pycache__/
 .venv/
 .DS_Store
+__pycache__/
