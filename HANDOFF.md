@@ -44,7 +44,6 @@ python -m pytest tests -q
 ## 3. 지금까지 된 것
 - `drive/`: 팀 규칙 기반 주행 코드에 YOLO 표지판 연결, 교차로 회전, 정지·신호등·서행·도착 동작을 추가했다. sim 과 테스트로 확인했다. → [docs/drive-changes.md](docs/drive-changes.md)
 - `data/yolo_clean_v2/`: 학습용 데이터셋. 고유 이미지 1779장, train 1420 + 반전 right 153, val 359.
-  - 원본 val 의 80% 가 train 과 같은 이미지였던 문제를 고쳤다.
   - 라벨이 없던 187장은 사전 라벨링한 뒤 사람이 검토했다.
   - 연속 프레임이 train/val 에 섞이지 않도록 블록 단위로 나눴다.
 - `weights/sign_baseline_ep25.pt`: 기준선 모델. 검토 전 데이터로 학습했고, 25 epoch 에서 val mAP50 0.973, mAP50-95 0.737.
