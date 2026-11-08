@@ -46,11 +46,11 @@ OFFROAD_GREEN_RATIO = 0.6     # 그 영역의 녹색 비율이 이 이상이면 
 
 # ---------------------------------------------------------------- 제어
 LOOP_HZ = 20                  # 주행 루프 주기 고정 (PID D항이 주기에 영향을 받음)
-PID_P = 1.0
+PID_P = 1.3                   # 1.0 에서 올림: 커브에서 더 빨리 꺾어 바깥 선을 덜 밟게
 PID_I = 0.0
 PID_D = 0.0
-BASE_THROTTLE = 0.35           # 0.3 은 실차 커브에서 너무 느려 바깥 선을 밟았다. 전력 문제가 다시 생기면 낮춘다
-SLOW_K = 0.5                  # 조향이 클수록 감속: BASE * (1 - SLOW_K * |steering|)
+BASE_THROTTLE = 0.3            # 0.35 는 출발 때 Pi 가 꺼졌다. 커브는 SLOW_K 로 바깥 바퀴를 더 밀어 보완
+SLOW_K = -0.4                 # 조향 비례 속도: BASE * (1 - SLOW_K * |steering|). 음수면 커브에서 바깥 바퀴가 빨라져 더 빨리 돈다
 # 모터가 실제로 도는 최소 PWM. 바퀴를 띄우고 `python3 -m drive.motors --sweep`으로
 # 실측해서 넣는다. 배터리 전압에 따라 달라진다.
 MIN_THROTTLE = 0.25
@@ -70,7 +70,7 @@ RIGHT_WHEEL_TRIM = 1.0
 MOTOR_WATCHDOG_S = 0.5          # 이 시간 동안 모터 명령이 없으면 스스로 정지
 # 바퀴 세기를 올릴 때 1초에 이만큼까지만 올린다 (내릴 때는 바로). 출발 순간 모터가 전류를 한꺼번에 끌어
 # 배터리 전압이 떨어지고 Pi 가 꺼지는 것을 줄인다. 0 이면 끈다. 1.5 면 BASE_THROTTLE 0.3 까지 약 0.2초.
-MOTOR_RAMP_PER_S = 1.5
+MOTOR_RAMP_PER_S = 1.0          # 출발 전류를 더 줄이려고 1.5 에서 낮춤 (0.3 까지 약 0.3초)
 BUZZER_PIN = 12
 HORN_TONE_HZ = 440              # TonalBuzzer 기본 음역(220~880Hz) 안의 값
 HORN_FRAMES = 6                 # 경적 표지판 하나에 울리는 프레임 수
