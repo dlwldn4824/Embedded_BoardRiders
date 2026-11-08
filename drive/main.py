@@ -323,6 +323,8 @@ def parse_args(argv=None):
                    help="offline: 카메라 원본(거꾸로)인 입력일 때 flip 적용 (real/dry는 항상 적용)")
     p.add_argument("--no-gui", action="store_true", help="창 없이 실행 (dry/offline)")
     p.add_argument("--show-mask", action="store_true", help="녹색 마스크 창도 띄움")
+    p.add_argument("--lite-gui", action="store_true",
+                   help="카메라 영상 대신 작은 상태 창만 1초에 2번 갱신 (VNC 화면 부담과 전력을 줄임). 키 조작은 같다")
     p.add_argument("--record", metavar="DIR", help="real/dry: flip한 카메라 프레임 저장")
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/run_<시각>_<모드>.csv)")
     p.add_argument("--signs", metavar="WEIGHTS",
@@ -422,6 +424,15 @@ class Runner:
             extra.append(f"slow: {ctrl.speed_scale * 100:.0f}% of normal speed, {ctrl._speed_frames / hz:.1f}s left")
         if self.offline and self.playback_paused:
             extra.append("playback paused (p / n)")
+        if self.args.lite_gui:
+            img = np.zeros((40 + 22 * (len(extra) + 2), 420, 3), np.uint8)
+            _text(img, f"{self.res.state or '-'}  {'RUN' if ctrl.running else 'PAUSED (s: start)'}", (10, 25),
+                  (0, 255, 0) if ctrl.running else (0, 200, 255), 0.6)
+            _text(img, f"FPS {self.fps:.1f}  L {self.wheels[0]:+.2f}  R {self.wheels[1]:+.2f}", (10, 50))
+            for i, s in enumerate(extra):
+                _text(img, s, (10, 74 + 22 * i))
+            cv2.imshow("drive", img)
+            return
         cv2.imshow("drive", draw_overlay(self.res, cfg, self.cmd, self.wheels, self.fps,
                                          self.proc_ms, ctrl.running, self.banner, extra))
         if self.show_mask:
@@ -483,7 +494,8 @@ class Runner:
                 self._process(frame, now - t0)
 
             if self.gui:
-                if tick % cfg.DISPLAY_EVERY == 0:
+                every = max(1, cfg.LOOP_HZ // 2) if self.args.lite_gui else cfg.DISPLAY_EVERY
+                if tick % every == 0:
                     self._show()
                 key = cv2.waitKey(1)
                 if key != -1 and not self._key(key):

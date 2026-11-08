@@ -49,7 +49,7 @@ LOOP_HZ = 20                  # 주행 루프 주기 고정 (PID D항이 주기�
 PID_P = 1.0
 PID_I = 0.0
 PID_D = 0.0
-BASE_THROTTLE = 0.35
+BASE_THROTTLE = 0.3            # 0.35 에서 낮춤: Pi 와 모터가 같은 배터리를 써서 주행 중 전압이 떨어지는 것을 줄인다
 SLOW_K = 0.5                  # 조향이 클수록 감속: BASE * (1 - SLOW_K * |steering|)
 # 모터가 실제로 도는 최소 PWM. 바퀴를 띄우고 `python3 -m drive.motors --sweep`으로
 # 실측해서 넣는다. 배터리 전압에 따라 달라진다.
@@ -69,7 +69,7 @@ TURN_MODE = "pivot"             # 'pivot': 안쪽 바퀴 감속 / 'spin': 안쪽
 RIGHT_WHEEL_TRIM = 1.0
 MOTOR_WATCHDOG_S = 0.5          # 이 시간 동안 모터 명령이 없으면 스스로 정지
 # 바퀴 세기를 올릴 때 1초에 이만큼까지만 올린다 (내릴 때는 바로). 출발 순간 모터가 전류를 한꺼번에 끌어
-# 배터리 전압이 떨어지고 Pi 가 꺼지는 것을 줄인다. 0 이면 끈다. 1.5 면 BASE_THROTTLE 0.35 까지 약 0.25초.
+# 배터리 전압이 떨어지고 Pi 가 꺼지는 것을 줄인다. 0 이면 끈다. 1.5 면 BASE_THROTTLE 0.3 까지 약 0.2초.
 MOTOR_RAMP_PER_S = 1.5
 BUZZER_PIN = 12
 HORN_TONE_HZ = 440              # TonalBuzzer 기본 음역(220~880Hz) 안의 값
@@ -103,9 +103,9 @@ SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까
 SIGN_IMGSZ = 640                # YOLO 입력 크기 (학습과 같게)
 # YOLO 를 돌리는 최소 간격(초). 매 프레임 돌리면 CPU 4코어가 꽉 차 전력이 모자랄 수 있다.
 # 0.25 = 1초에 최대 4번. SIGN_CONFIRM_WINDOW(15프레임=0.75초) 안에 2번 잡히려면 0.35 이하로 둔다.
-SIGN_DETECT_INTERVAL_S = 0.25
+SIGN_DETECT_INTERVAL_S = 0.35   # 전력 절약용으로 0.25 에서 올림. 이보다 크면 정지선 등을 놓친다
 # YOLO 스레드가 쓸 CPU 코어. None 이면 제한하지 않는다. 주행 루프는 나머지 코어도 쓸 수 있다.
-SIGN_CPU_CORES = (0, 1)
+SIGN_CPU_CORES = (0,)           # 전력 절약용으로 1코어만. 검출이 0.35초 안에 안 끝나면 (0, 1) 로 되돌린다
 # True: YOLO 를 별도 프로세스에서 돌린다 (주행 루프가 느려지지 않음). False: 예전처럼 스레드.
 SIGN_USE_PROCESS = True
 

@@ -258,6 +258,26 @@ python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite
 
 `s` 로 출발하고, 스페이스바(또는 아래 방향키)로 비상 정지하고, `q` 로 끝냅니다. 키를 받는 창이 떠야 하므로 Pi 에 모니터를 연결하거나 VNC 로 접속해서 실행합니다.
 
+#### 전력을 아끼는 실행 (보조배터리가 없을 때)
+
+기본값을 전력 절약 쪽으로 바꿔 두었습니다: `BASE_THROTTLE = 0.3`, `SIGN_DETECT_INTERVAL_S = 0.35`, `SIGN_CPU_CORES = (0,)`.
+화면도 작게 띄웁니다. 카메라 영상 대신 상태 글자만 1초에 2번 갱신하고, `s`·스페이스·`q` 키는 그대로 씁니다.
+
+```bash
+python3 -m drive.main --mode real --lite-gui --signs weights/sign_v3_26n_320_int8.tflite
+```
+
+CPU 최고 속도를 낮추면 순간 전력이 더 줄어듭니다 (한 번만, 재부팅 후 적용).
+```bash
+echo "arm_freq=1800" | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+```
+
+꺼지는 순간의 전압을 남기려면 주행 전에 다른 터미널에서 아래를 켜 둡니다. 다시 켠 뒤 `power.log` 마지막 줄을 봅니다.
+```bash
+while true; do echo "$(date +%T) $(vcgencmd get_throttled) $(vcgencmd pmic_read_adc EXT5V_V)" >> ~/power.log; sync; sleep 0.5; done
+```
+
 #### 주행을 시작하자마자 Pi 가 꺼질 때
 
 YOLO 와 모터가 동시에 전력을 끌어 배터리 전압이 순간적으로 떨어지는 경우입니다(저전압 리셋). 아래 순서로 확인합니다.
