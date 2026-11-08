@@ -106,6 +106,8 @@ SIGN_IMGSZ = 640                # YOLO 입력 크기 (학습과 같게)
 SIGN_DETECT_INTERVAL_S = 0.25
 # YOLO 스레드가 쓸 CPU 코어. None 이면 제한하지 않는다. 주행 루프는 나머지 코어도 쓸 수 있다.
 SIGN_CPU_CORES = (0, 1)
+# True: YOLO 를 별도 프로세스에서 돌린다 (주행 루프가 느려지지 않음). False: 예전처럼 스레드.
+SIGN_USE_PROCESS = True
 
 # ---------------------------------------------------------------- 표지판 동작 (LOOP_HZ 프레임 단위)
 SPEED_FRAMES = 120              # 서행 표지판 후 감속 유지 (6초)

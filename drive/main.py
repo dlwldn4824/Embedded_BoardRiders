@@ -459,6 +459,10 @@ class Runner:
                 self.fps = inst if self.fps == 0 else 0.9 * self.fps + 0.1 * inst
             last_tick = now
             tick += 1
+            if not self.offline and tick % (cfg.LOOP_HZ * 5) == 0 and self.fps < cfg.LOOP_HZ * 0.75:
+                # 동작 시간(회전·정지 등)을 프레임 수로 세므로, 루프가 느리면 그만큼 늘어진다
+                print(f"[경고] 주행 루프 {self.fps:.1f} Hz (목표 {cfg.LOOP_HZ}). "
+                      f"교차로 회전 등이 {cfg.LOOP_HZ / max(self.fps, 0.1):.1f}배 느려집니다.")
 
             frame = None
             if not self.playback_paused or self.step:
@@ -501,21 +505,25 @@ def main(argv=None):
             source = OfflineSource(args.input, args.repeat)
         else:
             source = CameraSource(cfg)
-        detector = NullSignDetector()
-        if args.signs:
-            from drive.signs import YoloSignDetector
+        if args.signs and getattr(cfg, "SIGN_USE_PROCESS", True):
+            from drive.signs import SignProcess
 
-            detector = YoloSignDetector(args.signs, imgsz=cfg.SIGN_IMGSZ)
-            print(f"표지판 검출기: {args.signs}")
-        signs = SignWorker(detector, SignInterpreter(cfg), interval_s=cfg.SIGN_DETECT_INTERVAL_S,
-                           cpu_cores=cfg.SIGN_CPU_CORES)
-        signs.start()
-        if args.signs:
-            # 첫 추론은 모델 준비로 오래 걸리고 전력도 많이 쓴다. 바퀴가 돌기 전에 미리 한 번 돌려 둔다.
-            t0 = time.monotonic()
-            detector.detect(np.zeros((cfg.CAMERA_SIZE[1], cfg.CAMERA_SIZE[0], 3), np.uint8))
-            print(f"표지판 검출기 준비 완료 ({(time.monotonic() - t0) * 1000:.0f} ms). "
+            print(f"표지판 검출기: {args.signs} (별도 프로세스, 준비 중...)")
+            signs = SignProcess(args.signs, cfg.SIGN_IMGSZ, SignInterpreter(cfg),
+                                interval_s=cfg.SIGN_DETECT_INTERVAL_S, cpu_cores=cfg.SIGN_CPU_CORES)
+            signs.start()
+            print(f"표지판 검출기 준비 완료 ({signs.ready_ms:.0f} ms). "
                   f"검출 간격 {cfg.SIGN_DETECT_INTERVAL_S}s, CPU 코어 {cfg.SIGN_CPU_CORES}")
+        else:
+            detector = NullSignDetector()
+            if args.signs:
+                from drive.signs import YoloSignDetector
+
+                detector = YoloSignDetector(args.signs, imgsz=cfg.SIGN_IMGSZ)
+                print(f"표지판 검출기: {args.signs} (스레드)")
+            signs = SignWorker(detector, SignInterpreter(cfg), interval_s=cfg.SIGN_DETECT_INTERVAL_S,
+                               cpu_cores=cfg.SIGN_CPU_CORES)
+            signs.start()
         if args.record and args.mode != "offline":
             recorder = Recorder(args.record)
         log_path = Path(args.log) if args.log else \
