@@ -53,10 +53,10 @@ BASE_THROTTLE = 0.3            # 0.35 는 출발 때 Pi 가 꺼졌다. 커브는
 SLOW_K = -0.4                 # 조향 비례 속도: BASE * (1 - SLOW_K * |steering|). 음수면 커브에서 바깥 바퀴가 빨라져 더 빨리 돈다
 # 모터가 실제로 도는 최소 PWM. 바퀴를 띄우고 `python3 -m drive.motors --sweep`으로
 # 실측해서 넣는다. 배터리 전압에 따라 달라진다.
-MIN_THROTTLE = 0.25
+MIN_THROTTLE = 0.28           # 0.25 는 실차에서 교차로 감속 중 바퀴가 멈췄다 (손으로 밀어 주면 다시 감)
 MAX_THROTTLE = 0.5
-INTERSECTION_THROTTLE = 0.28  # 교차로 감속 직진 속도
-INTERSECTION_MAX_FRAMES = 80   # 감속 직진 최대 프레임 수, 넘으면 정지 (sim: 교차로 통과에 약 60프레임)
+INTERSECTION_THROTTLE = 0.32  # 교차로 감속 직진 속도. 0.28 은 실차에서 멈춰 섰다
+INTERSECTION_MAX_FRAMES = 120  # 감속 직진 최대 프레임 수(6초), 넘으면 정지. 속도를 낮춰 4초에서 늘림
 
 # ---------------------------------------------------------------- 모터 / 부저 (gpiozero BCM 번호)
 PWMA, AIN1, AIN2 = 18, 22, 27   # A = 왼쪽 바퀴
@@ -121,9 +121,9 @@ FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선�
 FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
 # 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
 TURN_ENTRY_FRAMES = 40
-TURN_FRAMES = 20
+TURN_FRAMES = 25               # TURN_THROTTLE 을 낮춘 만큼 회전 시간을 늘림 (sim 좌·우·직진 통과)
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
-TURN_THROTTLE = 0.4
+TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
 # T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
 # 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
