@@ -353,6 +353,7 @@ class Runner:
         self.fps = 0.0
         self.proc_ms = 0.0
         self.banner = None
+        self.last_sign = None       # 화면에 2초간 보여 줄 마지막 표지판 이벤트
         self.states = Counter()
 
     # ------------------------------------------------------------ 한 프레임 처리
@@ -368,6 +369,7 @@ class Runner:
         self.signs.submit(upright, frame.fid)
         for ev in self.signs.poll():
             print(f"[sign] {ev}")
+            self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
         self.cmd = ctrl.update(res.state, res.error)
@@ -405,14 +407,19 @@ class Runner:
             cv2.imshow("drive", img)
             return
         extra = []
+        hz = cfg.LOOP_HZ
+        if self.last_sign and time.monotonic() - self.last_sign[1] < 2.0:
+            extra.append(f"sign: {self.last_sign[0]}")
+        if self.cmd.horn:
+            extra.append("HORN (buzzer on)")
         if ctrl.pending_turn:
             extra.append(f"next turn: {ctrl.pending_turn}")
         if ctrl._turn:
             extra.append(f"turn {ctrl._turn[0]} {ctrl._turn[1]}")
         if ctrl._wait:
-            extra.append(f"wait {ctrl._wait[0]} {ctrl._wait[1]}")
+            extra.append(f"wait {ctrl._wait[0]} {ctrl._wait[1] / hz:.1f}s left")
         if ctrl.speed_scale != 1.0:
-            extra.append(f"speed x{ctrl.speed_scale:.2f}")
+            extra.append(f"slow: {ctrl.speed_scale * 100:.0f}% of normal speed, {ctrl._speed_frames / hz:.1f}s left")
         if self.offline and self.playback_paused:
             extra.append("playback paused (p / n)")
         cv2.imshow("drive", draw_overlay(self.res, cfg, self.cmd, self.wheels, self.fps,
