@@ -49,7 +49,7 @@ LOOP_HZ = 20                  # 주행 루프 주기 고정 (PID D항이 주기�
 PID_P = 1.0
 PID_I = 0.0
 PID_D = 0.0
-BASE_THROTTLE = 0.3            # 0.35 에서 낮춤: Pi 와 모터가 같은 배터리를 써서 주행 중 전압이 떨어지는 것을 줄인다
+BASE_THROTTLE = 0.35           # 0.3 은 실차 커브에서 너무 느려 바깥 선을 밟았다. 전력 문제가 다시 생기면 낮춘다
 SLOW_K = 0.5                  # 조향이 클수록 감속: BASE * (1 - SLOW_K * |steering|)
 # 모터가 실제로 도는 최소 PWM. 바퀴를 띄우고 `python3 -m drive.motors --sweep`으로
 # 실측해서 넣는다. 배터리 전압에 따라 달라진다.
@@ -124,6 +124,14 @@ TURN_FRAMES = 20
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.4
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
+# T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
+# 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
+# SIDE_OPEN_FRAMES 연속 사라지면 회전을 시작한다. 0 이면 끈다. 바깥 커브도 한쪽이 열려 보이므로 창을 짧게 둔다.
+SIDE_TURN_WINDOW_FRAMES = 100   # 5초
+SIDE_OPEN_BANDS = 2
+SIDE_OPEN_FRAMES = 3
+SIDE_CLOSED_FRAMES = 5          # 열리기 전에 양쪽 경계가 이만큼 보여야 한다 (교차로를 막 나올 때 오작동 방지)
+SIDE_TURN_ENTRY_FRAMES = 40     # 열린 것을 본 뒤 옆길 가운데까지 직진할 프레임 (실차에서 맞춘다)
 
 # ---------------------------------------------------------------- 화면 / 기록
 DISPLAY_SCALE = 2               # 오버레이 창 확대 배율

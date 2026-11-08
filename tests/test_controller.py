@@ -163,3 +163,23 @@ def test_interpreter_cooldown():
     assert it([det("horn", 2)])
     it([det("horn", 5)])
     assert it([det("horn", 6)]) == []
+
+
+def test_side_branch_turn_after_sign():
+    # T자·옆길: 오른쪽 경계는 그대로이고 왼쪽만 열린다 (비전 상태는 ONE_SIDE)
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    for _ in range(config.SIDE_CLOSED_FRAMES):
+        assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
+    acts = [c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"]).action for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN" and c.pending_turn is None
+
+
+def test_side_branch_ignored_without_closed_road_first():
+    # 교차로를 막 빠져나올 때처럼 처음부터 한쪽이 열려 있으면 회전하지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = [c.update(ONE_SIDE, 0.0, ["L-", "L-", "LR"]).action for _ in range(10)]
+    assert "TURN" not in acts and c.pending_turn == "RIGHT"

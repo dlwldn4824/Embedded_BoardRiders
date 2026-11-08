@@ -54,6 +54,10 @@ class Controller:
         self._turn = None           # 교차로 회전 진행: [방향, 단계, 단계 프레임]
         self._finish_frames = None  # 정지선을 본 뒤 남은 주행 프레임
         self._stop_ignore = 0       # 정지 표지판 대기를 마친 뒤 같은 표지판을 무시할 남은 프레임
+        self._pending_seen = None   # 나이를 세는 중인 pending_turn
+        self._pending_age = 0       # pending_turn 을 받은 뒤 지난 프레임
+        self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
+        self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
 
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
@@ -101,28 +105,53 @@ class Controller:
     def _slow(self, throttle):
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
 
-    def _start_turn(self, direction):
-        self._turn = [direction, "ENTRY", 0]
+    def _start_turn(self, direction, entry_frames=None):
+        self._turn = [direction, "ENTRY", 0, entry_frames or self.cfg.TURN_ENTRY_FRAMES]
         self.pending_turn = None
+
+    def _side_branch(self, edges):
+        """T자·옆길 교차로: 한쪽 경계는 그대로인데 회전할 쪽만 열리면 비전은 ONE_SIDE 로 본다.
+        회전 표지판을 본 직후(SIDE_TURN_WINDOW_FRAMES 안)에 그쪽이 SIDE_OPEN_FRAMES 연속 열리면 교차로로 본다.
+        edges: 띠별 "LR"/"-R"/"L-"/"--" (가까운 띠 먼저)."""
+        cfg = self.cfg
+        if self.pending_turn != self._pending_seen:
+            self._pending_seen, self._pending_age, self._side_open = self.pending_turn, 0, 0
+            self._side_closed = 0
+        self._pending_age += 1
+        if edges and edges[0] == "LR":
+            self._side_closed += 1
+        if self.pending_turn not in ("LEFT", "RIGHT") or not edges or \
+                self._pending_age > getattr(cfg, "SIDE_TURN_WINDOW_FRAMES", 0):
+            self._side_open = 0
+            return False
+        open_pat = "-R" if self.pending_turn == "LEFT" else "L-"
+        n = getattr(cfg, "SIDE_OPEN_BANDS", 2)
+        # 교차로를 막 빠져나올 때도 한쪽이 열려 보이므로, 양쪽 경계를 먼저 충분히 본 뒤에 열린 것만 센다
+        if self._side_closed < getattr(cfg, "SIDE_CLOSED_FRAMES", 5):
+            self._side_open = 0
+            return False
+        self._side_open = self._side_open + 1 if all(e == open_pat for e in edges[:n]) else 0
+        return self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3)
 
     def _turning(self, state):
         """교차로 회전. 비전이 교차로 안에서 믿을 수 없으므로 시간 기반으로 돈다.
         ENTRY: 교차로 안쪽까지 직진 -> SPIN: 한쪽 바퀴 위주로 회전 -> EXIT: 차선이 다시 보일 때까지 서행 직진."""
         cfg = self.cfg
-        direction, phase, n = self._turn
+        direction, phase, n, entry = self._turn
         self._turn[2] += 1
         if phase == "ENTRY":
-            if n + 1 >= cfg.TURN_ENTRY_FRAMES:
-                self._turn[1:] = ["SPIN", 0]
+            if n + 1 >= entry:
+                self._turn[1:3] = ["SPIN", 0]
             return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
         if phase == "SPIN":
             if n + 1 >= cfg.TURN_FRAMES:
-                self._turn[1:] = ["EXIT", 0]
+                self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
             return Command(throttle=self._slow(cfg.TURN_THROTTLE), steering=s, action="TURN")
         # EXIT
         if state in PID_STATES:
             self._turn = None
+            self._side_closed = 0
             return None   # 차선을 다시 잡았다 -> 이번 프레임부터 PID
         if n >= cfg.TURN_EXIT_MAX_FRAMES:
             self._turn = None
@@ -153,7 +182,8 @@ class Controller:
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 self._wait = None
 
-    def update(self, state: Optional[str], error: Optional[float]) -> Command:
+    def update(self, state: Optional[str], error: Optional[float], edges=None) -> Command:
+        """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1
@@ -173,6 +203,8 @@ class Controller:
                 if self._finish_frames < 0:
                     self.finished = True
                     cmd = Command(action="FINISH")
+            if cmd is None and self._turn is None and state in PID_STATES and self._side_branch(edges):
+                self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None))
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state)
             if cmd is None:

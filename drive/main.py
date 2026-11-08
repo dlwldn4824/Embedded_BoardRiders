@@ -374,7 +374,7 @@ class Runner:
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
-        self.cmd = ctrl.update(res.state, res.error)
+        self.cmd = ctrl.update(res.state, res.error, [b.edges for b in res.bands])
         if self.cmd.action in MOVING_ACTIONS:
             self.wheels = car.drive(self.cmd.throttle, self.cmd.steering)
         else:
