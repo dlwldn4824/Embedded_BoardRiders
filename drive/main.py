@@ -507,8 +507,15 @@ def main(argv=None):
 
             detector = YoloSignDetector(args.signs, imgsz=cfg.SIGN_IMGSZ)
             print(f"표지판 검출기: {args.signs}")
-        signs = SignWorker(detector, SignInterpreter(cfg))
+        signs = SignWorker(detector, SignInterpreter(cfg), interval_s=cfg.SIGN_DETECT_INTERVAL_S,
+                           cpu_cores=cfg.SIGN_CPU_CORES)
         signs.start()
+        if args.signs:
+            # 첫 추론은 모델 준비로 오래 걸리고 전력도 많이 쓴다. 바퀴가 돌기 전에 미리 한 번 돌려 둔다.
+            t0 = time.monotonic()
+            detector.detect(np.zeros((cfg.CAMERA_SIZE[1], cfg.CAMERA_SIZE[0], 3), np.uint8))
+            print(f"표지판 검출기 준비 완료 ({(time.monotonic() - t0) * 1000:.0f} ms). "
+                  f"검출 간격 {cfg.SIGN_DETECT_INTERVAL_S}s, CPU 코어 {cfg.SIGN_CPU_CORES}")
         if args.record and args.mode != "offline":
             recorder = Recorder(args.record)
         log_path = Path(args.log) if args.log else \

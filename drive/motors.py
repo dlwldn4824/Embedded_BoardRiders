@@ -100,6 +100,7 @@ class Car:
         left = clamp(left, -1.0, 1.0)
         right = clamp(right, -1.0, 1.0)
         with self._lock:
+            left, right = self._ramp(left, right)
             if self.backend == "gpio" and not self._closed:
                 self._wheel(self.PWMA, self.AIN1, self.AIN2, left)
                 self._wheel(self.PWMB, self.BIN1, self.BIN2, right)
@@ -107,6 +108,19 @@ class Car:
             self._moving = left != 0 or right != 0
             self._last_cmd = time.monotonic()
         return self.wheels
+
+    def _ramp(self, left, right):
+        """세기를 올릴 때만 MOTOR_RAMP_PER_S 로 천천히 올린다. 내리거나 방향을 바꾸면 바로 따른다."""
+        rate = getattr(self.cfg, "MOTOR_RAMP_PER_S", 0)
+        if not rate:
+            return left, right
+        step = rate / self.cfg.LOOP_HZ      # 주행 루프가 프레임마다 한 번 부른다 (sim 도 같은 간격)
+        out = []
+        for new, old in zip((left, right), self.wheels):
+            if old * new >= 0 and abs(new) > abs(old):
+                new = (abs(old) + min(abs(new) - abs(old), step)) * (1 if new >= 0 else -1)
+            out.append(new)
+        return out[0], out[1]
 
     def drive(self, throttle, steering):
         left, right = mix(throttle, steering, self.turn_mode)

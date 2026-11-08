@@ -68,6 +68,9 @@ TURN_MODE = "pivot"             # 'pivot': 안쪽 바퀴 감속 / 'spin': 안쪽
 # sim: 좌우 차 8% 안은 보정 없이 교차로 통과, 15% 차는 1.03~1.09 로 보정하면 통과.
 RIGHT_WHEEL_TRIM = 1.0
 MOTOR_WATCHDOG_S = 0.5          # 이 시간 동안 모터 명령이 없으면 스스로 정지
+# 바퀴 세기를 올릴 때 1초에 이만큼까지만 올린다 (내릴 때는 바로). 출발 순간 모터가 전류를 한꺼번에 끌어
+# 배터리 전압이 떨어지고 Pi 가 꺼지는 것을 줄인다. 0 이면 끈다. 1.5 면 BASE_THROTTLE 0.35 까지 약 0.25초.
+MOTOR_RAMP_PER_S = 1.5
 BUZZER_PIN = 12
 HORN_TONE_HZ = 440              # TonalBuzzer 기본 음역(220~880Hz) 안의 값
 HORN_FRAMES = 6                 # 경적 표지판 하나에 울리는 프레임 수
@@ -98,6 +101,11 @@ SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레
 SIGN_CONFIRM_WINDOW = 15
 SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까지 기다릴 프레임 수
 SIGN_IMGSZ = 640                # YOLO 입력 크기 (학습과 같게)
+# YOLO 를 돌리는 최소 간격(초). 매 프레임 돌리면 CPU 4코어가 꽉 차 전력이 모자랄 수 있다.
+# 0.25 = 1초에 최대 4번. SIGN_CONFIRM_WINDOW(15프레임=0.75초) 안에 2번 잡히려면 0.35 이하로 둔다.
+SIGN_DETECT_INTERVAL_S = 0.25
+# YOLO 스레드가 쓸 CPU 코어. None 이면 제한하지 않는다. 주행 루프는 나머지 코어도 쓸 수 있다.
+SIGN_CPU_CORES = (0, 1)
 
 # ---------------------------------------------------------------- 표지판 동작 (LOOP_HZ 프레임 단위)
 SPEED_FRAMES = 120              # 서행 표지판 후 감속 유지 (6초)

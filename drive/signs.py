@@ -8,8 +8,10 @@
 """
 from __future__ import annotations
 
+import os
 import queue
 import threading
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
@@ -101,10 +103,12 @@ class SignInterpreter:
 
 
 class SignWorker(threading.Thread):
-    def __init__(self, detector, interpreter):
+    def __init__(self, detector, interpreter, interval_s=0.0, cpu_cores=None):
         super().__init__(daemon=True)
         self.detector = detector
         self.interpreter = interpreter
+        self.interval_s = interval_s     # 검출 한 번이 이보다 빨리 끝나면 남은 시간만큼 쉰다
+        self.cpu_cores = cpu_cores       # 이 스레드(와 검출기가 만드는 스레드)가 쓸 CPU 코어
         self._cond = threading.Condition()
         self._slot = None
         self._stopped = False
@@ -124,6 +128,11 @@ class SignWorker(threading.Thread):
                 return out
 
     def run(self):
+        if self.cpu_cores and hasattr(os, "sched_setaffinity"):   # Linux(Pi)에서만
+            try:
+                os.sched_setaffinity(0, set(self.cpu_cores))
+            except OSError as e:
+                print(f"[signs] CPU 코어 제한 실패: {e}")
         while True:
             with self._cond:
                 while self._slot is None and not self._stopped:
@@ -132,15 +141,19 @@ class SignWorker(threading.Thread):
                     return
                 frame, frame_id = self._slot
                 self._slot = None
+            t0 = time.monotonic()
             try:
                 detections = self.detector.detect(frame)
             except Exception as e:  # 검출기 오류로 주행을 멈추지 않는다
                 print(f"[signs] detector error: {e}")
                 continue
+            rest = self.interval_s - (time.monotonic() - t0)
             for d in detections:
                 d.setdefault("frame_id", frame_id)
             for ev in self.interpreter(detections):
                 self._events.put(ev)
+            if rest > 0:
+                time.sleep(rest)
 
     def stop(self):
         with self._cond:
