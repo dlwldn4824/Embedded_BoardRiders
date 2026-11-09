@@ -108,7 +108,20 @@ class SignInterpreter:
         turn = [d for d in detections if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN"
                 and d["conf"] >= self._rule(d["cls"])["min_conf"]]
         if len(turn) > 1:
-            nearest = max(turn, key=lambda d: d["box_h"])
+            # 같은 표지판에 straight 와 right 가 겹쳐 나오면 신뢰도가 높은 것을 고른다. 예전에는 상자가 조금 큰 쪽을
+            # 골라 신뢰도가 낮은 right 가 뽑혔다 (실차: 출발할 때 straight 를 right 로). 서로 다른 표지판이면 가까운 것
+            def same(a, b):
+                return abs(a.get("box_cx", 0) - b.get("box_cx", 0)) < max(a.get("box_w", 0), b.get("box_w", 0), 1) / 2 \
+                    and abs(a.get("box_y2", 0) - b.get("box_y2", 0)) < max(a["box_h"], b["box_h"], 1) / 2
+            groups = []
+            for d in sorted(turn, key=lambda d: -d["conf"]):
+                for g in groups:
+                    if same(g[0], d):
+                        g.append(d)
+                        break
+                else:
+                    groups.append([d])
+            nearest = max((g[0] for g in groups), key=lambda d: d["box_h"])
             detections = [d for d in detections if d not in turn or d is nearest]
         # 경적(파란 원 + 나팔)을 가끔 우회전(파란 원 + 화살표)으로 본다. 경적이 HORN_CONFUSE_FRAMES 안에 보였던 자리에서
         # 비슷한 크기의 회전 표지판이 보이면 같은 표지판으로 보고 버린다

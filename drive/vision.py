@@ -183,6 +183,10 @@ class LaneDetector:
             # 교차로에 들어갈 때는 먼 띠부터 열리므로, 가까운 띠까지 열리는 순간 여기로 온다.
             if all(b.edges == "--" and not b.note for b in bands):
                 return INTERSECTION
+            # 앞이 막힌 T자: 가까운 띠는 양옆이 열렸는데 먼 띠는 초록(트랙 테두리) 위에서 시작한다. 예전에는 교차로로 안 봐서
+            # LOST -> 정지했고, 우회전 표지판을 봤어도 돌지 못했다 (실차)
+            if near.edges == "--" and not near.note and any(b.note == "start on green" for b in bands):
+                return INTERSECTION
             return None
         if near.wide or (near.edges == "--" and not near.note):
             # 가까운 띠는 양쪽이 열렸는데 먼 띠는 도로가 보인다 -> 교차로

@@ -199,7 +199,7 @@ class Recorder(threading.Thread):
 class CsvLog:
     # fid: --record 로 저장한 이미지 파일 이름({fid:06d}.jpg)과 같은 번호. 이미지와 조향값을 짝짓는 데 쓴다.
     FIELDS = ["fid", "t", "state", "error", "steering", "throttle", "left", "right", "edges_found",
-              "raw_state", "action"]
+              "raw_state", "action", "pending", "note"]
 
     def __init__(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,11 +209,11 @@ class CsvLog:
         self.w.writerow(self.FIELDS)
         self.n = 0
 
-    def write(self, t, res, cmd, wheels, fid=None):
+    def write(self, t, res, cmd, wheels, fid=None, pending="", note=""):
         f3 = lambda x: "" if x is None else f"{x:.3f}"  # noqa: E731
         self.w.writerow(["" if fid is None else fid, f"{t:.3f}", res.state or "", f3(res.error), f3(cmd.steering),
                          f3(cmd.throttle), f3(wheels[0]), f3(wheels[1]), res.edges_found,
-                         res.candidate or "", cmd.action])
+                         res.candidate or "", cmd.action, pending or "", note])
         self.n += 1
         if self.n % 20 == 0:
             self.f.flush()
@@ -370,8 +370,10 @@ class Runner:
         upright = cv2.flip(frame.image, cfg.FLIP_CODE) if self.detector.flip else frame.image
         if not ctrl.sign_paused():   # 회전 중·출발 직후에는 YOLO 를 쉬어 모터 전류와 겹치지 않게 한다
             self.signs.submit(upright, frame.fid)
+        notes = []
         for ev in self.signs.poll():
             print(f"[sign] {ev}")
+            notes.append(f"sign {ev.cls} {ev.conf:.2f}")
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
@@ -379,9 +381,11 @@ class Runner:
         if ctrl.turn_started:   # 왜 돌기 시작했는지 남긴다 (교차로 / 옆길, 그때 띠 경계)
             d, why, edges = ctrl.turn_started
             print(f"[turn] frame={frame.fid} {d} ({why}) state={res.state} edges={edges}")
+            notes.append(f"turn {d} {why}")
             ctrl.turn_started = None
         if ctrl.notice:
             print(f"[turn] frame={frame.fid} {ctrl.notice}")
+            notes.append(ctrl.notice)
             ctrl.notice = None
         if self.cmd.action in MOVING_ACTIONS:
             self.wheels = car.drive(self.cmd.throttle, self.cmd.steering)
@@ -389,7 +393,10 @@ class Runner:
             self.wheels = car.stop()
         car.horn(self.cmd.horn)
 
-        self.log.write(t, res, self.cmd, self.wheels, frame.fid)
+        pend = ctrl.pending_turn or ""
+        if getattr(ctrl, "_deferred_turn", None):
+            pend += f" (next {ctrl._deferred_turn})"
+        self.log.write(t, res, self.cmd, self.wheels, frame.fid, pend, "; ".join(notes))
         self.states[res.state] += 1
         if self.recorder:
             self.recorder.put(frame.fid, upright)

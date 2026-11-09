@@ -16,7 +16,7 @@ from typing import Optional
 
 from simple_pid import PID
 
-from drive.vision import INTERSECTION, LANE, ONE_SIDE
+from drive.vision import INTERSECTION, LANE, LOST, OFF_ROAD, ONE_SIDE
 
 PID_STATES = (LANE, ONE_SIDE)
 
@@ -39,7 +39,9 @@ def near_error(res, cfg):
 def band_edges(res):
     """컨트롤러에 넘기는 띠별 경계. 양쪽 경계를 찾았지만 폭이 평소 도로 폭과 안 맞아 비전이 버린 띠(center 없음)는
     "lr" 로 바꾼다. 실차: 왼쪽으로 30~40도 돌았을 때 블록 양옆 좁은 틈을 "LR" 로 넘겨, 새 길로 보고 회전을 끝냈다."""
-    return ["lr" if b.edges == "LR" and b.center is None else b.edges for b in res.bands]
+    # 초록 위에서 시작한 띠(앞이 트랙 테두리·블록으로 막힘)는 "GG"
+    return ["GG" if getattr(b, "note", "") == "start on green" else
+            "lr" if b.edges == "LR" and b.center is None else b.edges for b in res.bands]
 
 
 def real_openings(res, cfg):
@@ -105,6 +107,7 @@ class Controller:
         self._last_view = None
         self.notice = None          # main.py 가 로그로 찍고 지우는 알림
         self._since_cross = 0       # 마지막 교차로·회전 뒤 지난 프레임
+        self._straight_open = 0     # 직진 예약 중 옆길이 열려 보인 프레임
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -120,7 +123,14 @@ class Controller:
         if ev.kind == "TURN":
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
-            if self._cross_frames or self._turn is not None:
+            if self._turn is not None:
+                return
+            if self._cross_frames:
+                # 교차로를 직진하는 중에는 방향을 바꾸지 않는다 (가운데 교차로에서 건너편 길의 우회전 표지판을 보고
+                # 대각선으로 꺾은 일). 다만 버리지 않고 받아 둔다: 앞이 막힌 T자면 직진할 수 없으니 이 방향으로 돈다.
+                # 실차: T자 건너편 우회전 표지판이 교차로에 들어선 뒤에야 커져서 무시됐고, 막힌 쪽으로 직진하다 LOST
+                if ev.value in ("LEFT", "RIGHT"):
+                    self._deferred_turn = ev.value
                 return
             if self.pending_turn is not None and ev.value != self.pending_turn and \
                     self._pending_stale < getattr(cfg, "PENDING_STALE_FRAMES", 200):
@@ -243,6 +253,9 @@ class Controller:
         self.pending_turn = None
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
+    def _recent_cross_now(self):
+        return self._since_cross < getattr(self.cfg, "SIDE_AFTER_CROSS_FRAMES", 60)
+
     def _side_branch(self, edges, opens=None):
         """T자·옆길 교차로: 한쪽 경계는 그대로인데 회전할 쪽만 열리면 비전은 ONE_SIDE 로 본다.
         회전 표지판을 본 직후(SIDE_TURN_WINDOW_FRAMES 안)에 그쪽이 SIDE_OPEN_FRAMES 연속 열리면 교차로로 본다.
@@ -262,6 +275,17 @@ class Controller:
             self._open_run += 1
             if self._open_run > getattr(cfg, "SIDE_OPEN_MAX_AGE", 40):
                 self._side_closed = 0
+        if self.pending_turn == "STRAIGHT" and edges and not self._recent_cross_now():
+            # 직진 표지판을 보고 옆길(진짜 열린 길)을 지나친다 -> 직진을 쓴 것. 예전에는 십자 교차로에서만 지워져서,
+            # 뒤에 본 회전 표지판이 다음 교차로용으로 오래 보류되어 우회전 옆길을 지나쳤다
+            seen = opens if opens is not None else edges
+            n = getattr(cfg, "SIDE_OPEN_BANDS", 2)
+            opened = all(e == "-R" for e in seen[:n]) or all(e == "L-" for e in seen[:n])
+            self._straight_open = self._straight_open + 1 if opened else 0
+            if self._straight_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 10):
+                self.pending_turn, self._straight_open = None, 0
+                self._since_cross, self._side_closed = 0, 0    # 이 옆길에서 바로 다음 방향으로 돌지 않게
+                return False
         if self.pending_turn not in ("LEFT", "RIGHT") or not edges or \
                 self._pending_age > getattr(cfg, "SIDE_TURN_WINDOW_FRAMES", 0):
             self._side_open = 0
@@ -272,7 +296,7 @@ class Controller:
         # 교차로나 회전을 마친 지 SIDE_AFTER_CROSS_FRAMES 가 지났으면 그 기록이 없어도 된다. 실차는 느려서
         # 표지판이 확정되기 전에 열린 구간이 40 프레임을 넘거나, 왼쪽에 붙어 와서 기록이 아예 없을 수 있다
         # (실차 사진: 오른쪽 옆길이 계속 L- 로 보이는데 직진)
-        recent_cross = self._since_cross < getattr(cfg, "SIDE_AFTER_CROSS_FRAMES", 60)
+        recent_cross = self._recent_cross_now()
         if self._side_closed < getattr(cfg, "SIDE_CLOSED_FRAMES", 5) and recent_cross:
             self._side_open = 0
             return False
@@ -335,7 +359,11 @@ class Controller:
             return Command(action="STOP")
         return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
 
-    def _intersection(self):
+    def _intersection(self, edges=None):
+        if self.pending_turn in (None, "STRAIGHT") and self._deferred_turn in ("LEFT", "RIGHT") \
+                and edges and edges[-1] == "GG" and not self._cross_frames:
+            # 앞이 막힌 T자라 직진할 수 없다. 받아 둔 다음 방향이 이 교차로 것이다
+            self.pending_turn, self._deferred_turn = self._deferred_turn, None
         if self.pending_turn in ("LEFT", "RIGHT"):
             self._start_turn(self.pending_turn)
             return self._turning(INTERSECTION)
@@ -394,6 +422,12 @@ class Controller:
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._side_branch(edges, opens):
                 self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None), "옆길", edges)
+            if cmd is None and self._turn is None and self._cross_frames and self._deferred_turn in ("LEFT", "RIGHT") \
+                    and (state in (OFF_ROAD, LOST) or (edges and "GG" in edges)):
+                # 직진하다 앞이 막혔다 (T자 끝) -> 받아 둔 방향으로 바로 돈다
+                d, self._deferred_turn, self._cross_frames = self._deferred_turn, None, 0
+                self.pending_turn = None
+                self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "막힌 T자", edges)
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
             if state == INTERSECTION or self._turn is not None or self._post_turn:
@@ -440,7 +474,7 @@ class Controller:
                 elif state == INTERSECTION and self._post_turn:
                     cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
                 elif state == INTERSECTION:
-                    cmd = self._intersection()
+                    cmd = self._intersection(edges)
                 elif self._last_pid is not None and self._lost_hold < getattr(self.cfg, "LOST_HOLD_FRAMES", 8) \
                         and abs(self._last_pid.steering) >= getattr(self.cfg, "LOST_HOLD_MIN_STEER", 0.3):
                     # 커브를 꺾던 중 화면이 잠깐 초록만 보이면(블록을 정면으로 봄) 그 화면이 지나갈 때까지

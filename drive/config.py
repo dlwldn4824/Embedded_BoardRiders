@@ -160,6 +160,7 @@ TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 �
 TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안 보이면 이만큼까지 계속 돈다 (3초)
 TURN_SPIN_HARD_MAX_FRAMES = 200 # 새 길이 정면 근처(오차 < TURN_EXIT_ERROR, 앞쪽 띠 LR)에 오기 전에는 직진으로 넘어가지 않고 이만큼까지 돈다
 TURN_EXIT_ERROR = 0.5
+TURN_BLOCKED_ENTRY_FRAMES = 3   # 직진하다 앞이 막힌 T자에서 받아 둔 방향으로 돌 때 더 들어갈 프레임 (이미 교차로 끝까지 왔다)
 TURN_BOOST_AFTER = 35           # 회전이 이 프레임보다 오래 걸리면 세기를 올린다 (실차: 0.32 로 3초에 30도밖에 못 돎)
 TURN_BOOST_PER_FRAME = 0.005    # 프레임마다 올리는 양. 0.32 -> 0.42 까지 약 20 프레임
 TURN_THROTTLE_MAX = 0.42        # 실차 로그: 0.42 로 3초 돌려도 Pi 가 꺼지지 않았다

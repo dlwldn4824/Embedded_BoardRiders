@@ -560,3 +560,67 @@ def test_lane_offset_follows_pending_turn():
     c2 = make()
     c2.on_sign(ev("TURN", "RIGHT"))
     assert c2.lane_offset() == config.TURN_PREP_OFFSET
+
+
+def test_turn_sign_seen_while_crossing_used_when_blocked_ahead():
+    # 실차: T자 건너편 우회전 표지판이 교차로에 들어선 뒤에야 이벤트가 됨 -> 막힌 쪽으로 직진하다 LOST.
+    # 받아 둔 방향으로, 앞이 막히면(먼 띠 초록 GG 또는 LOST) 바로 돈다
+    from drive.vision import LOST
+    c = make()
+    run(c, 5, INTERSECTION, None)                     # 표지판 없이 교차로 직진 중
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn is None
+    assert "TURN" not in run(c, 5, INTERSECTION, None)
+    m = c.update(INTERSECTION, None, ["--", "--", "GG"])
+    assert m.action == "TURN" and c._turn[0] == "RIGHT"
+    c2 = make()
+    run(c2, 5, INTERSECTION, None)
+    c2.on_sign(ev("TURN", "LEFT"))
+    assert c2.update(LOST, None, ["--", "--", "--"]).action == "TURN" and c2._turn[0] == "LEFT"
+
+
+def test_turn_sign_while_crossing_open_ahead_keeps_straight():
+    # 가운데 십자 교차로(앞이 열림)에서는 건너편 표지판을 봐도 계속 직진하고, 다음 교차로에 쓴다
+    c = make()
+    c.on_sign(ev("TURN", "STRAIGHT"))
+    run(c, 3, INTERSECTION, None)
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert "TURN" not in [c.update(INTERSECTION, None, ["--", "--", "--"]).action for _ in range(10)]
+    run(c, 2)
+    assert c.pending_turn == "RIGHT"
+
+
+def test_straight_used_up_at_side_branch_then_next_sign_applies():
+    # 직진 표지판을 보고 옆길(진짜 열린 길)을 지나치면 직진을 쓴 것. 보류했던 우회전이 다음에 쓰인다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c.on_sign(ev("TURN", "STRAIGHT"))
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn == "STRAIGHT"
+    for _ in range(config.SIDE_OPEN_FRAMES):
+        c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"], None, ["-R", "-R", "-R"])
+    assert c.pending_turn == "RIGHT"
+    acts = [c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"], None, ["-R", "-R", "-R"]).action for _ in range(15)]
+    assert "TURN" not in acts                         # 같은 옆길에서 바로 돌지는 않는다
+
+
+def test_same_sign_straight_and_right_picks_higher_confidence():
+    # 같은 표지판에 straight(0.85)와 right(0.55, 상자가 약간 큼)가 겹쳐 나오면 straight
+    it = SignInterpreter(config)
+    evs = []
+    for fid in range(0, 6, 2):
+        evs += it([{"cls": "straight", "conf": 0.85, "box_h": 70, "box_w": 66, "box_cx": 400, "box_y2": 200, "frame_id": fid},
+                   {"cls": "right", "conf": 0.55, "box_h": 74, "box_w": 70, "box_cx": 402, "box_y2": 202, "frame_id": fid}])
+    assert [e.value for e in evs] == ["STRAIGHT"]
+
+
+def test_vision_blocked_t_junction_is_intersection():
+    # 가까운 띠는 양옆이 열리고 먼 띠는 초록(트랙 테두리) 위에서 시작 -> 교차로 (예전: LOST)
+    from types import SimpleNamespace as NS
+    from drive.vision import LaneDetector
+    det = LaneDetector(config, flip=False)
+    near = NS(edges="--", note="", center=None, wide=False, y=195)
+    bands = [near, NS(edges="--", note="", center=None, wide=False, y=168),
+             NS(edges="--", note="start on green", center=None, wide=False, y=141)]
+    assert det._candidate(bands, near, False, 0.0) == INTERSECTION
