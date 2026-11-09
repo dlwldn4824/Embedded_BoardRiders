@@ -61,7 +61,9 @@ CENTER_FIRST = False
 CENTER_START_ERROR = 0.15       # 가까운 띠 기준 약 2cm
 CENTER_DONE_ERROR = 0.06
 CENTER_GAIN = 1.5
-CENTER_EXTRAP = 0.5            # 가까운·중간 띠 도로 중앙을 이은 선을 차 쪽으로 늘리는 비율 (차 위치 추정)
+CENTER_EXTRAP = 1.0            # 가까운·중간 띠 도로 중앙을 이은 선을 차 쪽으로 늘리는 비율 (차 위치 추정)
+CENTER_K = 1.0                 # 차 위치의 치우침을 조향에 더하는 배율 (항상). 내다본 오차만 쓰면 커브에서 안쪽으로 파고들거나
+                               # 바깥 테두리로 밀려 표지판·교차로를 놓쳤다. 실차 속도 sim 바깥 한 바퀴: 바퀴가 도로 안 63 -> 70%
 CENTER_THROTTLE = 0.28          # MIN_THROTTLE. 이보다 낮으면 바퀴가 멈춘다
 BASE_THROTTLE = 0.3            # 0.35 는 출발 때 Pi 가 꺼졌다. 커브는 SLOW_K 로 바깥 바퀴를 더 밀어 보완
 SLOW_K = -0.4                 # 조향 비례 속도: BASE * (1 - SLOW_K * |steering|). 음수면 커브에서 바깥 바퀴가 빨라져 더 빨리 돈다
@@ -76,7 +78,10 @@ INTERSECTION_MAX_FRAMES = 120  # 감속 직진 최대 프레임 수(6초), 넘�
 PWMA, AIN1, AIN2 = 18, 22, 27   # A = 왼쪽 바퀴
 PWMB, BIN1, BIN2 = 23, 25, 24   # B = 오른쪽 바퀴
 PWM_FREQUENCY = 100             # gpiozero PWMOutputDevice 기본값
-TURN_MODE = "pivot"             # 'pivot': 안쪽 바퀴 감속 / 'spin': 안쪽 바퀴 역회전까지
+TURN_MODE = "pivot"             # "keep_inner": 조향이 PIVOT_STEER 보다 작으면 안쪽 바퀴를 INNER_MIN_THROTTLE 아래로 안 내림 (sim 에서 차이 없음, 실차 시험용)
+INNER_MIN_THROTTLE = 0.27
+PIVOT_STEER = 0.8
+# TURN_MODE: 'pivot' 안쪽 바퀴 감속 / 'spin' 안쪽 바퀴 역회전까지
 # 오른쪽 바퀴 PWM 배율. 바닥에 놓고 감속 직진(INTERSECTION_THROTTLE)을 2m 시켜 봤을 때
 # 오른쪽으로 휘면 올리고 왼쪽으로 휘면 내린다 (데드밴드 때문에 1/세기비 보다 작은 값이 맞다).
 # sim: 좌우 차 8% 안은 보정 없이 교차로 통과, 15% 차는 1.03~1.09 로 보정하면 통과.

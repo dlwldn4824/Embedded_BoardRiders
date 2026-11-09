@@ -496,3 +496,25 @@ def test_turn_sign_cut_at_frame_edge_is_ignored():
     for fid in range(10, 20, 2):   # 화면 안으로 다 들어오면 받는다
         evs += it([{"cls": "right", "conf": 0.7, "box_h": 90, "box_w": 70, "box_cx": 120, "box_y2": 200, "frame_id": fid}])
     assert [e.value for e in evs] == ["RIGHT"]
+
+
+def test_invalid_both_edge_band_does_not_end_spin():
+    # 실차: 30~40도 돌았을 때 블록 양옆 좁은 틈을 LR 로 읽음 (비전은 폭이 안 맞아 버림, center 없음).
+    # band_edges 가 "lr" 로 바꾸므로 교차로 상태여도 회전을 끝내지 않는다
+    from types import SimpleNamespace as NS
+    from drive.controller import band_edges
+    r = NS(bands=[NS(edges="LR", center=None), NS(edges="LR", center=None), NS(edges="LR", center=190.0)])
+    assert band_edges(r) == ["lr", "lr", "LR"]
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES + config.TURN_FRAMES, INTERSECTION, None)
+    cmds = [c.update(INTERSECTION, 0.2, band_edges(r)) for _ in range(10)]
+    assert all(m.action == "TURN" and m.steering < 0 for m in cmds)
+
+
+def test_position_term_pulls_back_to_centre():
+    # 내다본 오차가 0 이어도 차 위치가 치우쳐 있으면(near) 그 반대쪽 도로 중앙으로 조향한다 (부호는 near 와 같다)
+    c = make()
+    m = c.update(LANE, 0.0, ["LR", "LR", "LR"], near=0.3)
+    assert m.steering > 0

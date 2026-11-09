@@ -36,6 +36,12 @@ def near_error(res, cfg):
     return max(-1.0, min(1.0, e))
 
 
+def band_edges(res):
+    """컨트롤러에 넘기는 띠별 경계. 양쪽 경계를 찾았지만 폭이 평소 도로 폭과 안 맞아 비전이 버린 띠(center 없음)는
+    "lr" 로 바꾼다. 실차: 왼쪽으로 30~40도 돌았을 때 블록 양옆 좁은 틈을 "LR" 로 넘겨, 새 길로 보고 회전을 끝냈다."""
+    return ["lr" if b.edges == "LR" and b.center is None else b.edges for b in res.bands]
+
+
 def real_openings(res, cfg):
     """띠마다 경계가 없는 쪽이 '진짜 열린 길'인지. 반대쪽 경계 + 평소 도로 폭으로 없는 경계가 있어야 할 자리를 구해,
     그 자리가 화면 안쪽(SIDE_OPEN_MARGIN px 이상)인데 경계가 없으면 열린 길이다. 화면 밖이면 차가 비스듬하거나
@@ -391,6 +397,11 @@ class Controller:
                         # 둥글어서 그 경계가 바깥으로 물러나 보이고, 그걸 따라 조향하면 10~15도 틀어진 채 교차로에
                         # 들어가 직진 중 선을 넘는다. 그동안은 핸들을 곧게 둔다
                         steering = 0.0
+                    k = getattr(self.cfg, "CENTER_K", 0.0)
+                    if k and near is not None and state in PID_STATES and not self._post_turn:
+                        # 내다본 오차만 쓰면 차가 이미 그쪽을 향할 때 치우쳐 있어도 "가운데"로 나온다. 커브에서 안쪽으로
+                        # 파고들거나(sim) 바깥 테두리로 밀려(실차) 표지판·교차로를 놓쳤다. 차 위치의 치우침도 더한다
+                        steering = clamp(steering + k * near, -1.0, 1.0)
                     throttle = self.throttle_for(steering)
                     if self._center_first(state, near if near is not None else error, edges):
                         # 도로 가운데에서 벗어나 있으면 (가장자리로 가면 표지판이 화면 밖으로 빠진다) 앞으로 가는 것보다

@@ -34,11 +34,12 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def mix(throttle, steering, mode="pivot"):
+def mix(throttle, steering, mode="pivot", inner_min=0.0, pivot_steer=1.0):
     """throttle(-1~1), steering(-1 좌 ~ +1 우) -> (left, right), 각 -1~1.
 
     pivot: 안쪽 바퀴만 (1-|steering|)배로 감속 (TwoWheelSteeringThrottle과 같음).
            steering=-1이면 왼쪽 바퀴가 멈춘다.
+    keep_inner: pivot 과 같지만 |steering| < pivot_steer 이면 안쪽 바퀴를 inner_min 아래로 내리지 않는다.
     spin : 안쪽 바퀴를 (1-2|steering|)배로. |steering|=0.5에서 멈추고
            그 이상이면 역회전, -1/+1에서는 제자리 회전.
     """
@@ -48,6 +49,11 @@ def mix(throttle, steering, mode="pivot"):
         inner = throttle * (1.0 - 2.0 * abs(steering))
     else:
         inner = throttle * (1.0 - abs(steering))
+        if mode == "keep_inner" and abs(steering) < pivot_steer and throttle > 0:
+            # 안쪽 바퀴가 멈추는 세기(약 0.25) 아래로 내리지 않는다. 멈추면 조향이 조금만 커져도 제자리 회전이 되어
+            # 커브에서 크게 출렁이며 바깥 테두리로 밀려났다. 조향은 바깥 바퀴(SLOW_K 로 세짐)와의 차이로 한다.
+            # |steering| >= pivot_steer (교차로 회전 등) 이면 예전처럼 안쪽 바퀴를 세운다
+            inner = max(inner, min(inner_min, throttle))
     left = right = throttle
     if steering < 0:
         left = inner
@@ -123,7 +129,8 @@ class Car:
         return out[0], out[1]
 
     def drive(self, throttle, steering):
-        left, right = mix(throttle, steering, self.turn_mode)
+        left, right = mix(throttle, steering, self.turn_mode,
+                          getattr(self.cfg, "INNER_MIN_THROTTLE", 0.0), getattr(self.cfg, "PIVOT_STEER", 1.0))
         # 좌우 모터 세기 차 보정. 교차로 직진/회전은 시간 기반이라 차가 한쪽으로 휘면 실패한다.
         return self.set_wheels(left, right * getattr(self.cfg, "RIGHT_WHEEL_TRIM", 1.0))
 

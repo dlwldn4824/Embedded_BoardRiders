@@ -30,7 +30,7 @@ import numpy as np
 
 from drive import config
 from drive import vision
-from drive.controller import Controller, near_error, real_openings
+from drive.controller import Controller, near_error, real_openings, band_edges
 from drive.main import ROOT, CsvLog, MOVING_ACTIONS, Recorder, _text, draw_mask, draw_overlay
 from drive.motors import Car
 
@@ -362,7 +362,7 @@ class Sim:
                 self.sign_log.append((self.t, ev))
                 self.ctrl.on_sign(ev)
         prev = self.cmd.action if self.cmd else None
-        self.cmd = self.ctrl.update(self.res.state, self.res.error, [b.edges for b in self.res.bands], near_error(self.res, self.cfg), real_openings(self.res, self.cfg))
+        self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg))
         if self.cmd.action in MOVING_ACTIONS:
             self.wheels = self.car.drive(self.cmd.throttle, self.cmd.steering)
         else:
