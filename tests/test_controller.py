@@ -676,3 +676,14 @@ def test_pending_turn_and_blocked_ahead_turns_instead_of_stopping():
     c2 = make()                      # 그쪽이 열린 적이 없으면 예전처럼 정지
     c2.on_sign(ev("TURN", "RIGHT"))
     assert c2.update(OFF_ROAD, None, ["--", "--", "--"]).action == "STOP"
+
+
+def test_close_sign_shortens_side_entry():
+    # 옆길 회전을 정하고 직진하는 중에 표지판이 60px 를 넘으면 직진을 줄이고 곧 돈다
+    c = make()
+    c._start_turn("RIGHT", 60, "옆길")
+    c._turn_ambiguous = True          # 경계로는 판단이 안 되는 옆길 (모두 "모름")
+    run(c, 10, INTERSECTION, None)
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 0, (500, 60, 563, 123)))
+    acts = [c.update(INTERSECTION, None, ["--", "--", "--"]) for _ in range(config.SIGN_NEAR_ENTRY_FRAMES + 2)]
+    assert acts[-1].steering > 0
