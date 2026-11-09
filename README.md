@@ -348,6 +348,7 @@ tests/     컨트롤러 · 표지판 필터 테스트
 - 표지판 v3 (실차 배경·red_line 보강, YOLO11/26·320 비교, Pi 기본 가중치): [docs/sign-v3.md](docs/sign-v3.md)
 - 주행 코드에 더한 것: [docs/drive-changes.md](docs/drive-changes.md)
 - 시뮬레이터 가상 표지판 · 검출 지연 · 무작위 반복 시험: [docs/sim-signs.md](docs/sim-signs.md) (`python -m drive.sim_trials`)
+- 실차 주행 시험 기록 (11-10: 문제 · 원인 · 조치 · 검증): [docs/real-car-2026-11-10.md](docs/real-car-2026-11-10.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
 - 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md)
