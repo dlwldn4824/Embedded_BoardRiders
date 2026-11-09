@@ -156,6 +156,7 @@ SIDE_TURN_WINDOW_FRAMES = 150   # 표지판을 마지막으로 본 뒤 약 9초 
 SIDE_OPEN_BANDS = 2
 SIDE_OPEN_FRAMES = 10            # 3 이면 왼쪽 선에 붙어 가다 잠깐 틀어져 오른쪽 경계가 화면 밖으로 나간 것도 옆길로 볼 수 있다
 SIDE_CLOSED_FRAMES = 5          # 열리기 전에 양쪽 경계가 이만큼 보여야 한다 (교차로를 막 나올 때 오작동 방지)
+SIDE_AFTER_CROSS_FRAMES = 60    # 교차로·회전 뒤 이만큼 지났으면 양쪽 경계 기록 없이도 열린 쪽을 옆길로 본다
 SIDE_OPEN_MAX_AGE = 40          # 표지판을 보기 전에 이미 열려 있던 옆길도 인정하는 기간 (2초). 더 오래 열려 있었으면 무시
 SIDE_TURN_ENTRY_FRAMES = 53     # 옆길 회전을 정한 뒤 직진할 프레임. 실차 속도 sim 에서 열림 확인까지 합쳐 63 프레임이 가장 좋았다 (SIDE_OPEN_FRAMES 를 늘린 만큼 줄임)
 

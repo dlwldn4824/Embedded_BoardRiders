@@ -390,3 +390,26 @@ def test_confusing_view_right_after_turn_keeps_turning():
     m = c.update(OFF_ROAD, 0.197, ["LR", "LR", "LR"])
     assert m.action == "TURN" and m.steering < 0
     assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
+
+
+def test_side_branch_without_closed_history_far_from_intersection():
+    # 실차 사진: 오른쪽 옆길이 계속 L-/L-/L- 로만 보이고 양쪽 경계(LR) 기록이 없다. 교차로에서 멀면 그래도 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    for _ in range(config.SIDE_AFTER_CROSS_FRAMES + 50):
+        c.update(ONE_SIDE, 0.05, ["L-", "L-", "LR"])
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"]).action for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN"
+
+
+def test_open_side_right_after_intersection_is_not_a_branch():
+    # 교차로를 막 나오면 한쪽이 열려 보인다. 그때는 옆길로 보지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    run(c, 5, INTERSECTION, None)
+    c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"])       # 교차로를 막 나옴
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn == "RIGHT"
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"]).action for _ in range(20)]
+    assert "TURN" not in acts

@@ -76,6 +76,7 @@ class Controller:
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
         self._post_dir = None       # 막 끝낸 회전 방향
+        self._since_cross = 0       # 마지막 교차로·회전 뒤 지난 프레임
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -205,7 +206,11 @@ class Controller:
         open_pat = "-R" if self.pending_turn == "LEFT" else "L-"
         n = getattr(cfg, "SIDE_OPEN_BANDS", 2)
         # 교차로를 막 빠져나올 때도 한쪽이 열려 보이므로, 양쪽 경계를 먼저 충분히 본 뒤에 열린 것만 센다
-        if self._side_closed < getattr(cfg, "SIDE_CLOSED_FRAMES", 5):
+        # 교차로나 회전을 마친 지 SIDE_AFTER_CROSS_FRAMES 가 지났으면 그 기록이 없어도 된다. 실차는 느려서
+        # 표지판이 확정되기 전에 열린 구간이 40 프레임을 넘거나, 왼쪽에 붙어 와서 기록이 아예 없을 수 있다
+        # (실차 사진: 오른쪽 옆길이 계속 L- 로 보이는데 직진)
+        recent_cross = self._since_cross < getattr(cfg, "SIDE_AFTER_CROSS_FRAMES", 60)
+        if self._side_closed < getattr(cfg, "SIDE_CLOSED_FRAMES", 5) and recent_cross:
             self._side_open = 0
             return False
         self._side_open = self._side_open + 1 if all(e == open_pat for e in edges[:n]) else 0
@@ -321,8 +326,11 @@ class Controller:
                 self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None), "옆길", edges)
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
-            if state == INTERSECTION:
+            if state == INTERSECTION or self._turn is not None or self._post_turn:
                 self._side_closed = 0   # 교차로를 나올 때 한쪽이 열려 보이는 것을 옆길로 보지 않게
+                self._since_cross = 0
+            else:
+                self._since_cross += 1
             if cmd is None:
                 if self._post_turn and state not in PID_STATES + (INTERSECTION,) \
                         and self._post_frames <= getattr(self.cfg, "POST_TURN_MAX_FRAMES", 150):
