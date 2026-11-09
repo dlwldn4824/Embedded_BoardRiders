@@ -96,6 +96,13 @@ class Controller:
         self._cross_frames = 0
         self._turn = None
 
+    def sign_paused(self):
+        """YOLO 를 쉬어야 하는지. 회전(TURN) 중과 출발 직후는 모터 전류가 가장 커서, YOLO 의 CPU 부하가 겹치면
+        배터리 전압이 떨어져 Pi 가 꺼진다. 이 구간에는 표지판도 필요 없다 (회전 방향은 이미 정해져 있다)."""
+        if not getattr(self.cfg, "SIGN_PAUSE_IN_TURN", True):
+            return False
+        return self._turn is not None or (self.running and self._run_frames < getattr(self.cfg, "SIGN_PAUSE_START_FRAMES", 0))
+
     # ------------------------------------------------------------ 매 프레임
     def throttle_for(self, steering):
         cfg = self.cfg

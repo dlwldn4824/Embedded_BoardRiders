@@ -368,7 +368,8 @@ class Runner:
         self.proc_ms = (time.perf_counter() - t_proc) * 1000.0
 
         upright = cv2.flip(frame.image, cfg.FLIP_CODE) if self.detector.flip else frame.image
-        self.signs.submit(upright, frame.fid)
+        if not ctrl.sign_paused():   # 회전 중·출발 직후에는 YOLO 를 쉬어 모터 전류와 겹치지 않게 한다
+            self.signs.submit(upright, frame.fid)
         for ev in self.signs.poll():
             print(f"[sign] {ev}")
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())

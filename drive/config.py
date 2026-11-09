@@ -109,6 +109,9 @@ SIGN_DETECT_INTERVAL_S = 0.35   # 전력 절약용으로 0.25 에서 올림. 이
 SIGN_CPU_CORES = (0,)           # 전력 절약용으로 1코어만. 검출이 0.35초 안에 안 끝나면 (0, 1) 로 되돌린다
 # True: YOLO 를 별도 프로세스에서 돌린다 (주행 루프가 느려지지 않음). False: 예전처럼 스레드.
 SIGN_USE_PROCESS = True
+# 회전 중과 출발 직후 SIGN_PAUSE_START_FRAMES 동안 YOLO 를 쉰다 (모터 전류가 클 때 CPU 부하를 겹치지 않게)
+SIGN_PAUSE_IN_TURN = True
+SIGN_PAUSE_START_FRAMES = 0      # 출발 직후 쉴 프레임. 출발점에 신호등이 있으면 빨간불을 놓칠 수 있어 기본은 0
 
 # ---------------------------------------------------------------- 표지판 동작 (LOOP_HZ 프레임 단위)
 SPEED_FRAMES = 120              # 서행 표지판 후 감속 유지 (6초)

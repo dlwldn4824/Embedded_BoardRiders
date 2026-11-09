@@ -311,7 +311,7 @@ class Sim:
         self.frames.append(self.cam.render(veh.x, veh.y, veh.psi))
         frame = self.frames[0]                     # LATENCY_FRAMES만큼 늦은 프레임
         self.res = self.det.process(frame)
-        if self.signs is not None:   # main.py 와 같은 순서: 표지판 이벤트 먼저, 그다음 ctrl.update
+        if self.signs is not None and not self.ctrl.sign_paused():   # main.py 와 같은 순서: 표지판 이벤트 먼저
             for ev in self.signs.step(self.steps, veh.x, veh.y, veh.psi, self.t):
                 self.sign_log.append((self.t, ev))
                 self.ctrl.on_sign(ev)
