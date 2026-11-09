@@ -260,6 +260,12 @@ python3 -m drive.main --mode real --signs weights/sign_v3_8n_int8.tflite
 
 #### 전력을 아끼는 실행 (보조배터리가 없을 때)
 
+경량화로 기본값에 들어간 것: 카메라 320x240 촬영(`CAMERA_CAPTURE_SIZE`), YOLO 320 입력, 1코어·0.35초 간격, 회전 중 YOLO 쉬기(`SIGN_PAUSE_IN_TURN`).
+주행 전에 CPU 최고 클럭도 낮춥니다 (재부팅하면 원래대로):
+```bash
+bash deploy/low_power.sh
+```
+
 기본값을 전력 절약 쪽으로 바꿔 두었습니다: `BASE_THROTTLE = 0.3`, `SIGN_DETECT_INTERVAL_S = 0.35`, `SIGN_CPU_CORES = (0,)`.
 화면도 작게 띄웁니다. 카메라 영상 대신 상태 글자만 1초에 2번 갱신하고, `s`·스페이스·`q` 키는 그대로 씁니다.
 

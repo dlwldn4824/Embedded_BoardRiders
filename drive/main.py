@@ -73,7 +73,7 @@ class CameraSource:
         except ImportError as e:
             raise SystemExit(f"picamera2를 불러올 수 없다 ({e}). Pi에서 실행하거나 --mode offline을 쓴다.")
 
-        self.cam = MyPiCamera(*cfg.CAMERA_SIZE)
+        self.cam = MyPiCamera(*getattr(cfg, "CAMERA_CAPTURE_SIZE", cfg.CAMERA_SIZE))
         if not self.cam.isOpened():
             raise RuntimeError("카메라를 열 수 없다")
         self._lock = threading.Lock()

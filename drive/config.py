@@ -4,7 +4,10 @@
 """
 
 # ---------------------------------------------------------------- 카메라 / 전처리
-CAMERA_SIZE = (640, 480)      # MyPiCamera(width, height)
+CAMERA_SIZE = (640, 480)      # 기준 해상도. 표지판 박스 기준값(SIGN_*)과 시뮬레이터 카메라가 이 단위다
+# 실제로 찍는 해상도. 320x240 이면 카메라 읽기·뒤집기·YOLO 전처리 연산이 1/4 로 줄어든다.
+# 차선 비전은 원래 320x240 으로 줄여 쓰고, YOLO 도 320 입력이라 정확도 차이는 없다. 640 모델을 쓸 때는 (640, 480).
+CAMERA_CAPTURE_SIZE = (320, 240)
 PROC_SIZE = (320, 240)        # 리사이즈 후 처리 해상도 (width, height)
 FLIP_CODE = -1                # 카메라가 거꾸로 달려 있어 상하좌우 반전
 BOTTOM_EXCLUDE = 20           # 화면 맨 아래 차체가 찍히는 줄 수, 계산에서 제외
@@ -101,7 +104,7 @@ SIGN_CLASS_RULES = {            # 클래스별로 다르게 둘 값만 적는다
 SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레임 안에서 이만큼 검출돼야 이벤트
 SIGN_CONFIRM_WINDOW = 15
 SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까지 기다릴 프레임 수
-SIGN_IMGSZ = 640                # YOLO 입력 크기 (학습과 같게)
+SIGN_IMGSZ = 320                # YOLO 입력 크기. Pi 는 weights/sign_v3_26n_320_int8.tflite (320). 640 모델이면 640 과 CAMERA_CAPTURE_SIZE (640, 480)
 # YOLO 를 돌리는 최소 간격(초). 매 프레임 돌리면 CPU 4코어가 꽉 차 전력이 모자랄 수 있다.
 # 0.25 = 1초에 최대 4번. SIGN_CONFIRM_WINDOW(15프레임=0.75초) 안에 2번 잡히려면 0.35 이하로 둔다.
 SIGN_DETECT_INTERVAL_S = 0.35   # 전력 절약용으로 0.25 에서 올림. 이보다 크면 정지선 등을 놓친다

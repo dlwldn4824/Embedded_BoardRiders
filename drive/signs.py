@@ -33,8 +33,10 @@ class NullSignDetector(SignDetector):
 class YoloSignDetector(SignDetector):
     """ultralytics YOLO. .pt / .onnx / .tflite 가중치를 모두 받는다 (Pi 에서는 INT8 .tflite 권장)."""
 
-    def __init__(self, weights, imgsz=640, conf=0.25):
+    def __init__(self, weights, imgsz=640, conf=0.25, ref_size=(640, 480)):
         from ultralytics import YOLO
+
+        self.ref_w = ref_size[0]   # 박스 좌표·크기는 항상 이 폭(640x480) 기준으로 돌려준다 (SIGN_* 기준값이 이 단위)
 
         self.model = YOLO(weights, task="detect")
         self.imgsz = imgsz
@@ -43,8 +45,10 @@ class YoloSignDetector(SignDetector):
 
     def detect(self, frame):
         res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf, verbose=False)[0]
+        k = self.ref_w / frame.shape[1]   # 320x240 으로 찍어도 640x480 기준 좌표로 맞춘다
         out = []
-        for c, cf, (x1, y1, x2, y2) in zip(res.boxes.cls.tolist(), res.boxes.conf.tolist(), res.boxes.xyxy.tolist()):
+        for c, cf, box in zip(res.boxes.cls.tolist(), res.boxes.conf.tolist(), res.boxes.xyxy.tolist()):
+            x1, y1, x2, y2 = (v * k for v in box)
             out.append({"cls": self.names[int(c)], "conf": float(cf), "box_w": x2 - x1, "box_h": y2 - y1,
                         "box_cx": (x1 + x2) / 2, "box_y2": y2})
         return out
