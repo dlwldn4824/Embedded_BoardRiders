@@ -121,6 +121,11 @@ class Controller:
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
+        from collections import deque
+        self._err_hist = deque(maxlen=getattr(self.cfg, "CURVE_HIST_FRAMES", 20))   # 커브 판단용 최근 오차
+        self._in_curve_now = False
+        self._curve_dir = 0         # +1 오른쪽 커브, -1 왼쪽 커브
+        self._curve_exit = 0        # 커브가 끝난 뒤 안쪽으로 붙을 남은 프레임
         self._seek = False          # 지금 옆길 회전이 "살짝 꺾으며 초록 찾기" 방식인지
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
@@ -250,10 +255,36 @@ class Controller:
         if self._post_turn:
             return 0.0
         if self.pending_turn == "LEFT":
-            return -getattr(cfg, "TURN_PREP_OFFSET", 0.0)
-        if self.pending_turn == "RIGHT":
-            return getattr(cfg, "TURN_PREP_OFFSET", 0.0)
-        return getattr(cfg, "LANE_OFFSET", 0.0)
+            base = -getattr(cfg, "TURN_PREP_OFFSET", 0.0)
+        elif self.pending_turn == "RIGHT":
+            base = getattr(cfg, "TURN_PREP_OFFSET", 0.0)
+        else:
+            base = getattr(cfg, "LANE_OFFSET", 0.0)
+        if self._curve_exit > 0:
+            # 커브를 크게 돌고 나오면 바깥 라인에 붙어 다음 옆길을 못 찾았다 (실차: 왼쪽 위 커브 뒤 오른쪽 옆길).
+            # 커브가 끝난 뒤 한동안 커브 안쪽(돈 쪽)으로 붙는다. 회전 예약 쪽과 같으면 더 큰 쪽을 쓴다
+            add = self._curve_dir * getattr(cfg, "CURVE_EXIT_OFFSET", 0.0)
+            base = max(base, add) if add > 0 else min(base, add)
+        return base
+
+    def _track_curve(self, state, error):
+        """최근 오차 평균이 한쪽으로 CURVE_ERR 이상이면 커브를 도는 중이다 (실차 커브: 오차 -0.4~-0.8 이 계속).
+        커브가 끝나면(평균이 CURVE_END_ERR 아래) CURVE_EXIT_FRAMES 동안 커브 안쪽으로 붙는다 (lane_offset)."""
+        if self._curve_exit > 0:
+            self._curve_exit -= 1
+        if state not in PID_STATES or error is None or self._turn is not None or self._post_turn:
+            self._err_hist.clear()
+            self._in_curve_now = False
+            return
+        self._err_hist.append(error)
+        if len(self._err_hist) < self._err_hist.maxlen:
+            return
+        m = sum(self._err_hist) / len(self._err_hist)
+        if abs(m) >= getattr(self.cfg, "CURVE_ERR", 0.25):
+            self._in_curve_now, self._curve_dir = True, (1 if m > 0 else -1)
+        elif self._in_curve_now and abs(m) < getattr(self.cfg, "CURVE_END_ERR", 0.1):
+            self._in_curve_now = False
+            self._curve_exit = getattr(self.cfg, "CURVE_EXIT_FRAMES", 120)
 
     def _spin_throttle(self, error, edges, n=0):
         """제자리 회전 세기. 한쪽 바퀴를 세우고 도는 4륜 차는 바퀴를 바닥에 끌어야 해서, 0.32 로는 도중에 멈출 수 있다
@@ -515,6 +546,7 @@ class Controller:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         self._ahead = ahead
         self._last_error = error
+        self._track_curve(state, error)
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1

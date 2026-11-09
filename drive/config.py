@@ -58,6 +58,13 @@ LANE_CENTER_OFFSET = 0.0
 # 차선 안에서 설 자리 (+ 오른쪽, - 왼쪽, 오차 단위). sim 에서 0.04 가 약 1.5cm. 차 폭 15cm, 도로 20cm 라 양쪽 여유 2.5cm
 LANE_OFFSET = 0.025             # 평소: 살짝 오른쪽, 약 1cm (표지판이 오른쪽 길가에 있다. 왼쪽으로 치우치면 표지판·교차로를 놓쳤다)
 TURN_PREP_OFFSET = 0.10         # 좌/우회전이 정해지면 그쪽으로 붙는다 (sim: 좌회전 예약 시 왼쪽 약 1cm)
+# 커브를 크게 돌고 나오면 바깥 라인에 붙어 다음 옆길을 못 찾았다 (노랑 커브 뒤 빨강 우회전). 최근 CURVE_HIST_FRAMES 오차 평균이
+# CURVE_ERR 이상이면 커브, CURVE_END_ERR 아래로 내려오면 커브 끝. 그 뒤 CURVE_EXIT_FRAMES 동안 커브 안쪽으로 CURVE_EXIT_OFFSET 만큼 붙는다
+CURVE_HIST_FRAMES = 20
+CURVE_ERR = 0.25
+CURVE_END_ERR = 0.2             # 실차 로그: 0.2 면 노랑 커브 뒤 붙기가 빨강 우회전 표지판보다 50~85 프레임 먼저 켜진다 (0.1 은 표지판과 같거나 늦음)
+CURVE_EXIT_OFFSET = 0.15
+CURVE_EXIT_FRAMES = 120
 # 가운데 찾기: 곧은 길에서 차가 가운데를 벗어나면(추정 치우침 > START) 천천히 가며 치우침으로 조향해 먼저 가운데로 돌아온다.
 # 실차 속도 sim 에서는 켜도 가운데로 오는 거리가 같고(20~40cm) 바퀴가 선을 넘는 프레임만 늘어 기본은 끈다. 실차에서 시험용
 CENTER_FIRST = False

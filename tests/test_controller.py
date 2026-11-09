@@ -721,3 +721,14 @@ def test_side_seek_arcs_then_line_traces():
         assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
     finally:
         config.SIDE_SEEK = old
+
+
+def test_after_curve_shift_toward_inside():
+    # 오른쪽 커브(오차가 계속 +)를 크게 돌고 나오면 한동안 커브 안쪽(오른쪽)으로 붙는다. 커브 도는 중에는 붙지 않는다
+    c = make()
+    for _ in range(config.CURVE_HIST_FRAMES + 5):
+        c.update(LANE, 0.5, ["LR", "LR", "LR"])
+    assert c._in_curve_now and c.lane_offset() == config.LANE_OFFSET
+    for _ in range(config.CURVE_HIST_FRAMES + 5):
+        c.update(LANE, 0.05, ["LR", "LR", "LR"])
+    assert c._curve_exit > 0 and c.lane_offset() == config.CURVE_EXIT_OFFSET
