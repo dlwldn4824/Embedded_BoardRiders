@@ -102,6 +102,9 @@ class Controller:
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
         self._post_dir = None       # 막 끝낸 회전 방향
+        self._turn_dir_now = None   # 지금 하고 있는 회전 방향
+        self._last_turn_dir = None  # 마지막으로 끝난 회전 방향
+        self._since_turn_end = 10 ** 6
         self._ahead = None          # 비전 ahead_green (앞이 막혔는지)
         self._tend = False          # 지금 회전이 막힌 T자 끝에서 빠져나가는 것인지
         self._gg_seen = 0
@@ -142,6 +145,11 @@ class Controller:
         if ev.kind == "TURN":
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
+            if self._turn is None and ev.value == self._last_turn_dir and \
+                    self._since_turn_end < getattr(cfg, "POST_TURN_SAME_SIGN_FRAMES", 60):
+                # 방금 돈 방향과 같은 표지판을 회전 직후 다시 봤다 = 방금 그 표지판 (실차 run_060120: 우회전 직후 같은 표지판을
+                # 다시 보고 우회전이 또 예약됨)
+                return
             if self._turn is not None:
                 # 옆길 회전을 정하고 직진(ENTRY) 중인데 같은 방향 표지판이 충분히 커졌다(가깝다) -> 직진을 줄이고 곧 돈다
                 box = getattr(ev, "box", None)
@@ -280,11 +288,20 @@ class Controller:
         if len(self._err_hist) < self._err_hist.maxlen:
             return
         m = sum(self._err_hist) / len(self._err_hist)
-        if abs(m) >= getattr(self.cfg, "CURVE_ERR", 0.25):
+        if abs(m) >= getattr(self.cfg, "CURVE_ERR", 0.25) and self._curve_exit == 0:
+            # (안쪽으로 붙는 동안에는 다시 판단하지 않는다: 설 자리를 옮길 때 오차가 출렁여 커브로 다시 보였다)
             self._in_curve_now, self._curve_dir = True, (1 if m > 0 else -1)
         elif self._in_curve_now and abs(m) < getattr(self.cfg, "CURVE_END_ERR", 0.1):
             self._in_curve_now = False
             self._curve_exit = getattr(self.cfg, "CURVE_EXIT_FRAMES", 120)
+        if self._in_curve_now or self._curve_exit == getattr(self.cfg, "CURVE_EXIT_FRAMES", 120):
+            # 커브 중·커브가 막 끝날 때는 교차로를 막 나온 것처럼 다룬다. 커브 안쪽 둥근 모서리가 물러나 보이는 것을
+            # 옆길 열림으로 세어, 안쪽으로 붙자마자 진짜 옆길 전에 돌았다 (실차). 회전할 쪽 경계를 다시 양쪽 경계로 본 뒤
+            # 열리는 것만 옆길로 센다. 그동안은 표지판 방향을 기억한 채 선을 따라간다
+            self._since_cross = 0
+            self._side_closed = 0
+            for pat in ("-R", "L-"):
+                self._side_runs[pat] = self._side_ages[pat] = self._side_real[pat] = self._unknown_runs[pat] = 0
 
     def _spin_throttle(self, error, edges, n=0):
         """제자리 회전 세기. 한쪽 바퀴를 세우고 도는 4륜 차는 바퀴를 바닥에 끌어야 해서, 0.32 로는 도중에 멈출 수 있다
@@ -391,6 +408,8 @@ class Controller:
         # opens: real_openings() 결과. 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길로 세지 않는다. 경적을 우회전으로
         # 잘못 봤을 때 오른쪽에 길이 없는데도 돌던 것을 막는다
         self._side_open = self._side_runs[open_pat]
+        if len(self._err_hist) >= 5 and abs(sum(self._err_hist) / len(self._err_hist)) >= getattr(cfg, "CURVE_ERR", 0.25):
+            return False        # 커브를 도는 중 (커브 판정 20 프레임이 차기 전이라도): 옆길로 돌지 않는다
         if self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3):
             # 표지판보다 먼저 열려 있었으면(age 가 길면) 옆길에 그만큼 가깝다 -> 직진을 줄인다
             self._side_late = max(0, self._side_ages[open_pat] - getattr(cfg, "SIDE_OPEN_FRAMES", 3))
@@ -524,6 +543,12 @@ class Controller:
         # 직진 표지판 또는 표지판 없음: 감속 직진, INTERSECTION_MAX_FRAMES를 넘으면 정지
         self._cross_frames += 1
         if self._cross_frames > self.cfg.INTERSECTION_MAX_FRAMES:
+            if self._deferred_turn in ("LEFT", "RIGHT"):
+                # 교차로를 한참 직진했는데도 끝나지 않는다 (T자). 직진 중 받아 둔 회전 방향으로 돈다
+                # (실차 run_060243: 우회전 표지판이 직진 중에 확정돼 보류됐고, 교차로 안에서 정지)
+                d, self._deferred_turn, self._cross_frames = self._deferred_turn, None, 0
+                self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "직진이 안 끝나 받아 둔 방향으로", edges)
+                return self._turning(INTERSECTION, edges=edges)
             return Command(action="STOP")
         return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
 
@@ -546,7 +571,8 @@ class Controller:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         self._ahead = ahead
         self._last_error = error
-        self._track_curve(state, error)
+        # 커브 판단은 설 자리를 반영한 오차(PID 가 맞추려는 값)로 한다. 곧은 길에서 한쪽에 서 있으면 원래 오차는 남지만 이 값은 0 근처다
+        self._track_curve(state, None if error is None else error + self.lane_offset())
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1
@@ -684,6 +710,13 @@ class Controller:
             self._last_pid = None                       # 회전·직진·정지 등은 유지할 PID 가 없다
         elif (state in PID_STATES or self._post_turn) and error is not None:
             self._last_pid, self._lost_hold = cmd, 0    # 도로를 보고 낸 PID
+        # 회전이 어떤 경로로 끝났든 (새 길 찾음 / EXIT / 정지) 끝난 뒤 지난 프레임을 센다 (같은 표지판 다시 보기 무시용)
+        if self._turn is not None:
+            self._turn_dir_now = self._turn[0]
+        elif self._turn_dir_now is not None:
+            self._last_turn_dir, self._turn_dir_now, self._since_turn_end = self._turn_dir_now, None, 0
+        else:
+            self._since_turn_end += 1
         self._last_action = cmd.action
         cmd.horn = horn
         return cmd

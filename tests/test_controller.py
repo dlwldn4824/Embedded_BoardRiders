@@ -732,3 +732,46 @@ def test_after_curve_shift_toward_inside():
     for _ in range(config.CURVE_HIST_FRAMES + 5):
         c.update(LANE, 0.05, ["LR", "LR", "LR"])
     assert c._curve_exit > 0 and c.lane_offset() == config.CURVE_EXIT_OFFSET
+
+
+def test_after_curve_follow_line_before_side_turn():
+    # 커브 직후 안쪽으로 붙는 동안 커브 안쪽 모서리가 "열림"처럼 보여도 바로 돌지 않는다.
+    # 회전할 쪽 경계를 양쪽 경계로 다시 본 뒤 열리는 옆길에서 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c.on_sign(ev("TURN", "RIGHT"))
+    for _ in range(config.CURVE_HIST_FRAMES + 5):
+        c.update(ONE_SIDE, 0.5, ["L-", "L-", "L-"], None, ["L-", "L-", "L-"])     # 오른쪽 커브
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"], None, ["L-", "L-", "L-"]).action
+            for _ in range(config.CURVE_HIST_FRAMES + 10)]                          # 커브 끝, 오른쪽이 열려 보임
+    assert "TURN" not in acts
+    for _ in range(config.SIDE_CLOSED_FRAMES + 2):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"], None, ["LR", "LR", "LR"])         # 블록 경계를 다시 봄
+    acts = [c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"], None, ["L-", "L-", "L-"]).action
+            for _ in range(config.SIDE_OPEN_FRAMES)]                                # 진짜 옆길
+    assert acts[-1] == "TURN"
+
+
+def test_cross_timeout_with_held_turn_turns_instead_of_stop():
+    # 실차 run_060243: 교차로 직진 중 우회전 표지판이 늦게 확정돼 보류 -> 직진이 최대 시간을 넘으면 정지 대신 우회전
+    c = make()
+    run(c, config.CROSS_LATE_SIGN_FRAMES + 5, INTERSECTION, None)
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = [c.update(INTERSECTION, None, ["--", "-R", "-R"]) for _ in range(config.INTERSECTION_MAX_FRAMES)]
+    assert "STOP" not in [a.action for a in acts] and c._turn is not None and c._turn[0] == "RIGHT"
+
+
+def test_same_sign_right_after_turn_is_ignored():
+    # 실차 run_060120: 우회전 직후 같은 우회전 표지판을 다시 보고 우회전이 또 예약됨 -> 무시
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES + config.TURN_FRAMES, INTERSECTION, None)
+    for _ in range(config.TURN_DONE_CONFIRM):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    assert c._post_turn
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn is None
+    c.on_sign(ev("TURN", "LEFT"))     # 다른 방향은 받는다
+    assert c.pending_turn == "LEFT"
