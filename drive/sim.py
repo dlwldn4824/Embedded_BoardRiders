@@ -362,7 +362,7 @@ class Sim:
                 self.sign_log.append((self.t, ev))
                 self.ctrl.on_sign(ev)
         prev = self.cmd.action if self.cmd else None
-        self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg))
+        self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg), self.res.ahead_green)
         if self.cmd.action in MOVING_ACTIONS:
             self.wheels = self.car.drive(self.cmd.throttle, self.cmd.steering)
         else:

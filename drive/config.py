@@ -161,6 +161,12 @@ TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안
 TURN_SPIN_HARD_MAX_FRAMES = 200 # 새 길이 정면 근처(오차 < TURN_EXIT_ERROR, 앞쪽 띠 LR)에 오기 전에는 직진으로 넘어가지 않고 이만큼까지 돈다
 TURN_EXIT_ERROR = 0.5
 TURN_BLOCKED_ENTRY_FRAMES = 3   # 직진하다 앞이 막힌 T자에서 받아 둔 방향으로 돌 때 더 들어갈 프레임 (이미 교차로 끝까지 왔다)
+# 막힌 T자 끝에서 빠져나가는 회전: 교차로를 알아볼 때 먼 띠 위 초록 비율(ahead_green)이 TEND_AHEAD_GREEN 이상이면,
+# 정해진 진입 프레임 대신 먼 띠가 테두리(GG)에 닿은 뒤 TEND_EXTRA_FRAMES 더 가서 돈다 (최대 TURN_ENTRY_TEND_MAX)
+TEND_AHEAD_GREEN = 0.75
+AHEAD_PROBE_H = 30              # 먼 띠 위 몇 줄까지 보는지 (320x240 기준)
+TEND_EXTRA_FRAMES = 4
+TURN_ENTRY_TEND_MAX = 90
 TURN_BOOST_AFTER = 35           # 회전이 이 프레임보다 오래 걸리면 세기를 올린다 (실차: 0.32 로 3초에 30도밖에 못 돎)
 TURN_BOOST_PER_FRAME = 0.005    # 프레임마다 올리는 양. 0.32 -> 0.42 까지 약 20 프레임
 TURN_THROTTLE_MAX = 0.42        # 실차 로그: 0.42 로 3초 돌려도 Pi 가 꺼지지 않았다

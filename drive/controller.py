@@ -102,6 +102,9 @@ class Controller:
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
         self._post_dir = None       # 막 끝낸 회전 방향
+        self._ahead = None          # 비전 ahead_green (앞이 막혔는지)
+        self._tend = False          # 지금 회전이 막힌 T자 끝에서 빠져나가는 것인지
+        self._gg_seen = 0
         self._stuck = 0             # 회전 중 화면이 그대로인 프레임 (차가 안 돎)
         self._kick = 0              # 세게 미는 남은 프레임
         self._last_view = None
@@ -330,6 +333,12 @@ class Controller:
         direction, phase, n, entry = self._turn
         self._turn[2] += 1
         if phase == "ENTRY":
+            if self._tend and edges and edges[-1] == "GG":
+                # 막힌 T자 끝에서 빠져나갈 때: 먼 띠가 테두리에 닿은 뒤 TEND_EXTRA_FRAMES 더 가서 돈다 (사람 운전과 같은 시점).
+                # 안으로 들어가는 회전보다 늦게 돈다
+                self._gg_seen += 1
+                if self._gg_seen >= getattr(cfg, "TEND_EXTRA_FRAMES", 4):
+                    entry = n + 1
             if n + 1 >= entry:
                 self._turn[1:3] = ["SPIN", 0]
             return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
@@ -380,8 +389,11 @@ class Controller:
             # 앞이 막힌 T자라 직진할 수 없다. 받아 둔 다음 방향이 이 교차로 것이다
             self.pending_turn, self._deferred_turn = self._deferred_turn, None
         if self.pending_turn in ("LEFT", "RIGHT"):
-            self._start_turn(self.pending_turn)
-            return self._turning(INTERSECTION)
+            tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
+            self._start_turn(self.pending_turn, getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else None,
+                             "막힌 T자 끝" if tend else "교차로", edges)
+            self._tend, self._gg_seen = tend, 0
+            return self._turning(INTERSECTION, edges=edges)
         # 직진 표지판 또는 표지판 없음: 감속 직진, INTERSECTION_MAX_FRAMES를 넘으면 정지
         self._cross_frames += 1
         if self._cross_frames > self.cfg.INTERSECTION_MAX_FRAMES:
@@ -402,8 +414,10 @@ class Controller:
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 self._wait = None
 
-    def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None) -> Command:
+    def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None,
+               ahead=None) -> Command:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
+        self._ahead = ahead
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1

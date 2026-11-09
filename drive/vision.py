@@ -93,6 +93,7 @@ class VisionResult:
     center: Optional[float] = None    # 최종 도로 중앙 x
     error: Optional[float] = None     # (center - 화면중앙) / (화면폭/2), -1~1
     candidate: Optional[str] = None   # 이 프레임만 보고 낸 상태 (None: 유효한 띠 없음)
+    ahead_green: float = 0.0          # 먼 띠 위쪽 초록 띠 비율 (앞이 막혔는지)
     state: Optional[str] = None       # 떨림 방지를 거친 상태
     offroad_ratio: float = 0.0
     dark: bool = False
@@ -240,6 +241,13 @@ class LaneDetector:
         probe = mask[near.y:near.y + near.h, x0:x1]
         res.offroad_ratio = float((probe > 0).mean()) if probe.size else 0.0
 
+        # 먼 띠 위쪽에 화면을 가로지르는 초록(트랙 테두리)이 있으면 앞이 막힌 T자다. 가운데 60% 폭에서 줄마다 초록 비율의
+        # 최댓값 (먼 띠 위 30줄). 실차: 막힌 T자 중앙값 0.83, 십자 교차로 최대 0.49. sim: 막힌 T자 1.0, 십자 최대 0.68
+        far = min(bands, key=lambda b: b.y)
+        y0 = max(0, far.y - getattr(cfg, "AHEAD_PROBE_H", 30))
+        x0, x1 = int(w * 0.2), int(w * 0.8)
+        strip = mask[y0:far.y, x0:x1]
+        res.ahead_green = float((strip > 0).mean(axis=1).max()) if strip.size else 0.0
         res.candidate = self._candidate(bands, near, dark, res.offroad_ratio)
         self._no_valid = self._no_valid + 1 if res.candidate is None else 0
         if res.candidate is None:

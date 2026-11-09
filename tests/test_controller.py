@@ -624,3 +624,20 @@ def test_vision_blocked_t_junction_is_intersection():
     bands = [near, NS(edges="--", note="", center=None, wide=False, y=168),
              NS(edges="--", note="start on green", center=None, wide=False, y=141)]
     assert det._candidate(bands, near, False, 0.0) == INTERSECTION
+
+
+def test_t_end_exit_turns_after_reaching_the_border():
+    # 막힌 T자 끝(먼 띠 위 초록 띠 >= TEND_AHEAD_GREEN)에서 빠져나갈 때는 정해진 진입 프레임이 지나도 직진하고,
+    # 먼 띠가 테두리(GG)에 닿은 뒤 TEND_EXTRA_FRAMES 더 가서 돈다. 십자 교차로는 예전 그대로
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.85)
+    acts = [c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.85) for _ in range(config.TURN_ENTRY_FRAMES + 5)]
+    assert all(m.steering == 0.0 for m in acts)                     # 아직 직진
+    gg = [c.update(INTERSECTION, None, ["--", "--", "GG"], ahead=0.95) for _ in range(config.TEND_EXTRA_FRAMES + 1)]
+    assert gg[-1].steering > 0                                       # 테두리에 닿은 뒤 우회전
+    c2 = make()
+    c2.on_sign(ev("TURN", "RIGHT"))
+    c2.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.5)
+    acts = [c2.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.5) for _ in range(config.TURN_ENTRY_FRAMES + 2)]
+    assert acts[-1].steering > 0                                     # 십자 교차로: 정해진 진입 뒤 회전
