@@ -329,3 +329,24 @@ def test_center_first_slows_and_steers_by_position():
         assert cmd.throttle != config.CENTER_THROTTLE or cmd.steering == 0.0
     finally:
         config.CENTER_FIRST = old
+
+
+def test_spin_continues_while_view_is_all_green():
+    # 느리게 돌아 TURN_SPIN_MAX_FRAMES 가 지나도 화면이 블록의 초록만 보이면 직진으로 넘어가지 않고 계속 돈다
+    from drive.vision import OFF_ROAD
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    for _ in range(config.TURN_ENTRY_FRAMES + config.TURN_SPIN_MAX_FRAMES + 5):
+        cmd = c.update(OFF_ROAD, None, ["--", "--", "--"])
+    assert cmd.action == "TURN" and cmd.steering < 0 and c._turn[1] == "SPIN"
+
+
+def test_hold_steering_briefly_when_road_disappears_in_curve():
+    # 커브를 꺾던 중 잠깐 도로가 안 보이면 직전 조향을 유지하고, 계속 안 보이면 정지
+    from drive.vision import OFF_ROAD
+    c = make()
+    last = c.update(LANE, 0.5, ["LR", "LR", "LR"])
+    held = [c.update(OFF_ROAD, None, ["--", "--", "--"]) for _ in range(config.LOST_HOLD_FRAMES)]
+    assert all(h.action == "PID" and h.steering == last.steering for h in held)
+    assert c.update(OFF_ROAD, None, ["--", "--", "--"]).action == "STOP"

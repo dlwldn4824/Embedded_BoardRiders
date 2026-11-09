@@ -75,6 +75,8 @@ class Controller:
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
+        self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
+        self._lost_hold = 0
         self._deferred_turn = None  # 앞 표지판 방향을 쓰기 전에 본 다른 방향 (다음 교차로용)
         self._pending_stale = 0     # pending_turn 표지판을 마지막으로 본 뒤 지난 프레임
         self._post_turn = False  # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
@@ -231,7 +233,11 @@ class Controller:
                     self._post_lane = self._post_frames = 0
                     return None   # 새 길이 정면에 보인다 -> 이번 프레임부터 PID
                 if n + 1 >= getattr(cfg, "TURN_SPIN_MAX_FRAMES", cfg.TURN_FRAMES):
-                    self._turn[1:3] = ["EXIT", 0]
+                    # 도는 도중(약 45도)에는 화면이 블록의 초록만 보인다. 그때 직진(EXIT)으로 넘어가면 블록으로
+                    # 들어가 멈춘다 (실차). 도로가 하나도 안 보이면 TURN_SPIN_HARD_MAX_FRAMES 까지 계속 돈다
+                    no_road = not edges or all(e == "--" for e in edges) or state not in PID_STATES + (INTERSECTION,)
+                    if not no_road or n + 1 >= getattr(cfg, "TURN_SPIN_HARD_MAX_FRAMES", 120):
+                        self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
             return Command(throttle=self._slow(cfg.TURN_THROTTLE), steering=s, action="TURN")
         # EXIT
@@ -332,6 +338,12 @@ class Controller:
                     cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
                 elif state == INTERSECTION:
                     cmd = self._intersection()
+                elif self._last_pid is not None and self._lost_hold < getattr(self.cfg, "LOST_HOLD_FRAMES", 8) \
+                        and abs(self._last_pid.steering) >= getattr(self.cfg, "LOST_HOLD_MIN_STEER", 0.3):
+                    # 커브를 꺾던 중 화면이 잠깐 초록만 보이면(블록을 정면으로 봄) 그 화면이 지나갈 때까지
+                    # 직전 조향을 유지한다. LOST_HOLD_FRAMES 가 지나도 도로가 안 보이면 정지
+                    self._lost_hold += 1
+                    cmd = Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
                 else:
                     # OFF_ROAD, LOST, 상태 없음, 또는 이번 프레임에 도로 중앙이 없음 -> 즉시 정지
                     cmd = Command(action="STOP")
@@ -346,6 +358,10 @@ class Controller:
         elif self._deferred_turn and not self._cross_frames:
             # 앞 방향을 썼다 (회전을 시작했거나 교차로를 지났다) -> 받아 둔 다음 교차로 방향을 적용
             self.pending_turn, self._deferred_turn, self._pending_stale = self._deferred_turn, None, 0
+        if cmd.action != "PID":
+            self._last_pid = None                       # 회전·직진·정지 등은 유지할 PID 가 없다
+        elif (state in PID_STATES or self._post_turn) and error is not None:
+            self._last_pid, self._lost_hold = cmd, 0    # 도로를 보고 낸 PID
         self._last_action = cmd.action
         cmd.horn = horn
         return cmd

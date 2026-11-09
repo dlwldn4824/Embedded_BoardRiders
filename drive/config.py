@@ -143,6 +143,9 @@ TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
 TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안 보이면 이만큼까지 계속 돈다 (3초)
+TURN_SPIN_HARD_MAX_FRAMES = 120 # 화면에 도로가 하나도 없으면(블록 초록만) 직진으로 넘어가지 않고 이만큼까지 돈다
+LOST_HOLD_FRAMES = 8            # 커브를 꺾던 중(조향 >= LOST_HOLD_MIN_STEER) 도로가 안 보이면 직전 조향을 이만큼 유지 (약 0.5초)
+LOST_HOLD_MIN_STEER = 0.3
 TURN_DONE_ERROR = 0.35          # 회전 끝 판정: 양쪽 경계가 보이고(LANE) 도로 중앙 오차가 이보다 작을 때
 # T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
 # 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
