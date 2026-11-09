@@ -154,7 +154,11 @@ TURN_KICK_THROTTLE = 0.42       # 그때 잠깐 미는 세기. 0.4 를 계속 �
 TURN_KICK_FRAMES = 6            # 약 0.35 초
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
 TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안 보이면 이만큼까지 계속 돈다 (3초)
-TURN_SPIN_HARD_MAX_FRAMES = 120 # 화면에 도로가 하나도 없으면(블록 초록만) 직진으로 넘어가지 않고 이만큼까지 돈다
+TURN_SPIN_HARD_MAX_FRAMES = 200 # 새 길이 정면 근처(오차 < TURN_EXIT_ERROR, 앞쪽 띠 LR)에 오기 전에는 직진으로 넘어가지 않고 이만큼까지 돈다
+TURN_EXIT_ERROR = 0.5
+TURN_BOOST_AFTER = 35           # 회전이 이 프레임보다 오래 걸리면 세기를 올린다 (실차: 0.32 로 3초에 30도밖에 못 돎)
+TURN_BOOST_PER_FRAME = 0.005    # 프레임마다 올리는 양. 0.32 -> 0.42 까지 약 20 프레임
+TURN_THROTTLE_MAX = 0.42        # 실차 로그: 0.42 로 3초 돌려도 Pi 가 꺼지지 않았다
 LOST_HOLD_FRAMES = 8            # 커브를 꺾던 중(조향 >= LOST_HOLD_MIN_STEER) 도로가 안 보이면 직전 조향을 이만큼 유지 (약 0.5초)
 LOST_HOLD_MIN_STEER = 0.3
 TURN_DONE_ERROR = 0.35          # 회전 끝 판정: 양쪽 경계가 보이고(LANE) 도로 중앙 오차가 이보다 작을 때

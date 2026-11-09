@@ -199,7 +199,7 @@ class Controller:
             self._centering = abs(error) > getattr(cfg, "CENTER_START_ERROR", 0.15)
         return self._centering
 
-    def _spin_throttle(self, error, edges):
+    def _spin_throttle(self, error, edges, n=0):
         """제자리 회전 세기. 한쪽 바퀴를 세우고 도는 4륜 차는 바퀴를 바닥에 끌어야 해서, 0.32 로는 도중에 멈출 수 있다
         (실차: 45도쯤에서 못 돎). 화면(오차·띠 경계)이 TURN_STUCK_FRAMES 동안 그대로면 멈춘 것으로 보고
         TURN_KICK_FRAMES 동안 TURN_KICK_THROTTLE 로 민다. 세게 미는 시간을 짧게 두어 전압 강하를 줄인다."""
@@ -214,7 +214,9 @@ class Controller:
         if self._kick > 0:
             self._kick -= 1
             return self._slow(getattr(cfg, "TURN_KICK_THROTTLE", 0.42))
-        return self._slow(cfg.TURN_THROTTLE)
+        # 오래 돌고 있으면(실차: 0.32 로 3초에 30도) 세기를 조금씩 올린다. 잘 도는 회전은 그 전에 끝나 영향이 없다
+        boost = max(0, n - getattr(cfg, "TURN_BOOST_AFTER", 35)) * getattr(cfg, "TURN_BOOST_PER_FRAME", 0.005)
+        return self._slow(min(cfg.TURN_THROTTLE + boost, getattr(cfg, "TURN_THROTTLE_MAX", 0.42)))
 
     def _slow(self, throttle):
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
@@ -300,11 +302,15 @@ class Controller:
                 if n + 1 >= getattr(cfg, "TURN_SPIN_MAX_FRAMES", cfg.TURN_FRAMES):
                     # 도는 도중(약 45도)에는 화면이 블록의 초록만 보인다. 그때 직진(EXIT)으로 넘어가면 블록으로
                     # 들어가 멈춘다 (실차). 도로가 하나도 안 보이면 TURN_SPIN_HARD_MAX_FRAMES 까지 계속 돈다
-                    no_road = not edges or all(e == "--" for e in edges) or state not in PID_STATES + (INTERSECTION,)
-                    if not no_road or n + 1 >= getattr(cfg, "TURN_SPIN_HARD_MAX_FRAMES", 120):
+                    # 새 길이 대충이라도 정면에 오기 전에는 직진으로 넘어가지 않는다. 실차: 0.32 로 30도밖에 못 돈 채
+                    # 60 프레임이 지나 직진 -> PID 가 원래 길(오른쪽, 오차 +1.0)을 따라 오른쪽으로 꺾었다
+                    near_aligned = (state in PID_STATES + (INTERSECTION,) and error is not None
+                                    and abs(error) < getattr(cfg, "TURN_EXIT_ERROR", 0.5)
+                                    and bool(edges) and any(e == "LR" for e in edges[1:3]))
+                    if near_aligned or n + 1 >= getattr(cfg, "TURN_SPIN_HARD_MAX_FRAMES", 200):
                         self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
-            return Command(throttle=self._spin_throttle(error, edges), steering=s, action="TURN")
+            return Command(throttle=self._spin_throttle(error, edges, n), steering=s, action="TURN")
         # EXIT
         if state in PID_STATES:
             self._turn = None

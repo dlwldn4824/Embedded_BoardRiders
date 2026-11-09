@@ -518,3 +518,20 @@ def test_position_term_pulls_back_to_centre():
     c = make()
     m = c.update(LANE, 0.0, ["LR", "LR", "LR"], near=0.3)
     assert m.steering > 0
+
+
+def test_slow_spin_ramps_up_and_does_not_exit_toward_old_road():
+    # 실차 로그: 0.32 로 3초에 30도만 돌고, 60 프레임에 직진으로 넘어가 원래 길(오차 +1.0)로 오른쪽 꺾음.
+    # 이제는 세기를 0.42 까지 올리며, 새 길이 정면 근처에 오기 전에는 직진으로 넘어가지 않는다
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES, INTERSECTION, None)
+    # 화면은 조금씩 바뀐다 (느리게라도 돈다) -> 멈춤 감지(세게 밀기)와 구분
+    cmds = [c.update(INTERSECTION, 0.4 + 0.01 * (i % 50), ["--", "L-", "L-"])
+            for i in range(config.TURN_SPIN_MAX_FRAMES + 30)]
+    assert all(m.action == "TURN" and m.steering < 0 for m in cmds)
+    assert cmds[-1].throttle == config.TURN_THROTTLE_MAX
+    assert cmds[10].throttle == config.TURN_THROTTLE
+    c.update(INTERSECTION, 0.3, ["--", "LR", "LR"])   # 새 길이 정면 근처 -> 이제 회전을 마무리
+    assert c._turn is None or c._turn[1] != "SPIN"
