@@ -363,3 +363,30 @@ def test_hold_steering_briefly_when_road_disappears_in_curve():
     held = [c.update(OFF_ROAD, None, ["--", "--", "--"]) for _ in range(config.LOST_HOLD_FRAMES)]
     assert all(h.action == "PID" and h.steering == last.steering for h in held)
     assert c.update(OFF_ROAD, None, ["--", "--", "--"]).action == "STOP"
+
+
+def test_block_view_mid_turn_does_not_end_spin():
+    # 실차 사진: 왼쪽으로 45도쯤 돌면 블록을 정면으로 본다. 띠 경계는 LR, 오차 +0.20 이지만 상태는 OFF_ROAD.
+    # 새 길로 보지 않고 계속 왼쪽으로 돈다
+    from drive.vision import OFF_ROAD
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES + config.TURN_FRAMES, INTERSECTION, None)
+    cmds = [c.update(OFF_ROAD, 0.197, ["LR", "LR", "LR"]) for _ in range(20)]
+    assert all(m.action == "TURN" and m.steering < 0 for m in cmds)
+
+
+def test_confusing_view_right_after_turn_keeps_turning():
+    # 회전을 끝낸 직후 헷갈리는 화면이 나오면 PID(반대 조향)나 정지 대신 하던 방향으로 계속 돈다
+    from drive.vision import OFF_ROAD
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES + config.TURN_FRAMES, INTERSECTION, None)
+    for _ in range(config.TURN_DONE_CONFIRM):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    assert c._turn is None and c._post_turn
+    m = c.update(OFF_ROAD, 0.197, ["LR", "LR", "LR"])
+    assert m.action == "TURN" and m.steering < 0
+    assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"

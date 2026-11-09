@@ -75,6 +75,7 @@ class Controller:
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
+        self._post_dir = None       # 막 끝낸 회전 방향
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -226,7 +227,10 @@ class Controller:
             if n + 1 >= cfg.TURN_FRAMES:
                 # 차는 아직 교차로 안이라 가까운 띠는 열려 있다. 앞쪽(중간·먼) 띠에 새 길의 양쪽 경계가 보이고
                 # 도로 중앙이 화면 가운데 근처면 회전을 끝낸다 (상태값은 3프레임 확인 때문에 늦어서 띠를 직접 본다)
-                done = (error is not None and edges is not None and len(edges) >= 3
+                # 비전이 OFF_ROAD/LOST 가 아닐 때만 (교차로 안이라 INTERSECTION 은 괜찮다). 45도쯤 블록을 정면으로
+                # 보면 띠 경계는 "LR" 인데(블록 가운데를 좁은 길로 읽음) 상태는 OFF_ROAD 다. 그걸 새 길로 보고 끝내면
+                # 반대로 조향하다 멈췄다
+                done = (state in PID_STATES + (INTERSECTION,) and error is not None and edges is not None and len(edges) >= 3
                         and edges[1] == "LR" and edges[2] == "LR" and abs(error) < getattr(cfg, "TURN_DONE_ERROR", 0.35))
                 # 45도 근처에서는 교차로 대각선 너머 블록 두 개 사이가 잠깐 길처럼 보일 수 있다. 연속으로 보여야 끝낸다
                 self._done_run = self._done_run + 1 if done else 0
@@ -235,6 +239,7 @@ class Controller:
                     self._turn = None
                     self._side_closed = 0
                     self._post_turn = True   # 새 차선에 들어설 때까지는 새 회전을 시작하지 않고 PID 로 간다
+                    self._post_dir = direction
                     self._post_lane = self._post_frames = 0
                     return None   # 새 길이 정면에 보인다 -> 이번 프레임부터 PID
                 if n + 1 >= getattr(cfg, "TURN_SPIN_MAX_FRAMES", cfg.TURN_FRAMES):
@@ -319,7 +324,12 @@ class Controller:
             if state == INTERSECTION:
                 self._side_closed = 0   # 교차로를 나올 때 한쪽이 열려 보이는 것을 옆길로 보지 않게
             if cmd is None:
-                if (state in PID_STATES or self._post_turn) and error is not None:
+                if self._post_turn and state not in PID_STATES + (INTERSECTION,) \
+                        and self._post_frames <= getattr(self.cfg, "POST_TURN_MAX_FRAMES", 150):
+                    # 회전을 끝낸 직후 다시 헷갈리는 화면(OFF_ROAD/LOST)이 나오면, 도로가 보일 때까지 하던 방향으로 계속 돈다
+                    s = self.cfg.TURN_STEERING if self._post_dir == "RIGHT" else -self.cfg.TURN_STEERING
+                    cmd = Command(throttle=self._slow(self.cfg.TURN_THROTTLE), steering=s, action="TURN")
+                elif (state in PID_STATES or self._post_turn) and error is not None:
                     if self._last_action != "PID":
                         self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
                     steering = float(self.pid(-error, dt=self.dt))
