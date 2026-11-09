@@ -196,3 +196,25 @@ def test_spin_continues_until_new_road_is_ahead():
         cmd = c.update(INTERSECTION, 0.8, ["L-", "L-", "L-"])
     assert cmd.action == "TURN" and cmd.steering < 0
     assert c.update(ONE_SIDE, 0.05, ["L-", "LR", "LR"]).action == "PID"
+
+
+def test_side_branch_already_open_when_sign_seen():
+    # 표지판을 옆길 바로 앞에 두면, 표지판을 알아볼 때 이미 옆길이 열려 있다. 그래도 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    for _ in range(config.SIDE_CLOSED_FRAMES):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    for _ in range(5):
+        c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"])   # 옆길이 먼저 열림
+    c.on_sign(ev("TURN", "LEFT"))
+    acts = [c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"]).action for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN"
+
+
+def test_turn_sign_ignored_while_crossing():
+    # 직진으로 교차로를 지나는 중에 건너편 길의 우회전 표지판이 보여도 방향을 바꾸지 않는다
+    c = make()
+    c.on_sign(ev("TURN", "STRAIGHT"))
+    run(c, 5, INTERSECTION, None)
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert "TURN" not in run(c, 5, INTERSECTION, None)

@@ -59,11 +59,16 @@ class Controller:
         self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
         self._post_turn = False     # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
+        self._open_run = 0          # 가까운 띠가 연속으로 양쪽 경계가 아닌 프레임
 
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
         cfg = self.cfg
         if ev.kind == "TURN":
+            # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
+            # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
+            if self._cross_frames or self._turn is not None or self._post_turn:
+                return
             self.pending_turn = ev.value
         elif ev.kind == "HORN":
             self._horn_frames = cfg.HORN_FRAMES
@@ -125,10 +130,16 @@ class Controller:
         cfg = self.cfg
         if self.pending_turn != self._pending_seen:
             self._pending_seen, self._pending_age, self._side_open = self.pending_turn, 0, 0
-            self._side_closed = 0
         self._pending_age += 1
+        # 양쪽 경계를 본 기록은 표지판을 보기 전부터 센다. 표지판을 옆길 바로 앞에 두면, 표지판을 알아볼 때쯤
+        # 이미 옆길이 열려 있다 (실차에서 표지판을 뒤로 옮겨야 돌던 원인). 다만 열린 지 오래됐으면 기록을 지운다.
         if edges and edges[0] == "LR":
             self._side_closed += 1
+            self._open_run = 0
+        else:
+            self._open_run += 1
+            if self._open_run > getattr(cfg, "SIDE_OPEN_MAX_AGE", 40):
+                self._side_closed = 0
         if self.pending_turn not in ("LEFT", "RIGHT") or not edges or \
                 self._pending_age > getattr(cfg, "SIDE_TURN_WINDOW_FRAMES", 0):
             self._side_open = 0
@@ -230,6 +241,8 @@ class Controller:
                 cmd = self._turning(state, error, edges)
             if self._post_turn and state != INTERSECTION:
                 self._post_turn = False
+            if state == INTERSECTION:
+                self._side_closed = 0   # 교차로를 나올 때 한쪽이 열려 보이는 것을 옆길로 보지 않게
             if cmd is None:
                 if (state in PID_STATES or self._post_turn) and error is not None:
                     if self._last_action != "PID":
