@@ -111,6 +111,7 @@ class Controller:
         self.notice = None          # main.py 가 로그로 찍고 지우는 알림
         self._since_cross = 0       # 마지막 교차로·회전 뒤 지난 프레임
         self._straight_open = 0     # 직진 예약 중 옆길이 열려 보인 프레임
+        self._open_skip = 0         # 옆길을 알아볼 때 건너뛴 가까운 띠 수
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -256,20 +257,23 @@ class Controller:
         self.pending_turn = None
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
-    @staticmethod
-    def _side_is_open(seen, open_pat, n=2):
+    def _side_is_open(self, seen, open_pat, n=2):
         """회전할 쪽이 열렸는지. 가까운 n 개 띠가 모두 열림(open_pat)이면 열림.
         차가 반대쪽 선에 붙으면 경계가 있어야 할 자리가 화면 밖이라 "모름"("L?"/"?R")이 된다. 화면 밖으로 나가는 것은
         늘 가까운 띠부터다 (sim: 바깥 라인에 3cm 넘게 붙으면 오른쪽 옆길을 100% 놓침, 실제 띠: L?/L?/L-, L?/L-/L-).
         그래서 가까운 쪽에서부터 이어진 "모름"만 건너뛰고, 그 다음 띠부터 n 개가 열림이면(띠가 모자라면 남은 것 모두) 열림.
-        커브는 가까운 띠가 열림인데 중간 띠가 "모름"(-R/?R/-R)이라 여기에 걸리지 않는다."""
+        커브는 가까운 띠가 열림인데 중간 띠가 "모름"(-R/?R/-R)이라 여기에 걸리지 않는다.
+        건너뛴 띠 수를 self._open_skip 에 남긴다 (먼 띠로 알아봤으면 옆길이 그만큼 멀다)."""
         unknown = "L?" if open_pat == "L-" else "?R"
         look = list(seen[:n + 1])
         k = 0
         while k < len(look) and k < n and look[k] == unknown:
             k += 1
         rest = look[k:k + n] if k else look[:n]
-        return bool(rest) and all(e == open_pat for e in rest)
+        ok = bool(rest) and all(e == open_pat for e in rest)
+        if ok:
+            self._open_skip = k
+        return ok
 
     def _recent_cross_now(self):
         return self._since_cross < getattr(self.cfg, "SIDE_AFTER_CROSS_FRAMES", 60)
@@ -450,7 +454,11 @@ class Controller:
                     self._side_closed = 0
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._side_branch(edges, opens):
-                self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None), "옆길", edges)
+                # 먼 띠로 옆길을 알아봤으면(가까운 띠 "모름") 옆길이 그만큼 멀다 -> 더 직진한 뒤 돈다 (실차: 너무 일찍 돎)
+                entry = getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", 53) + \
+                    self._open_skip * getattr(self.cfg, "SIDE_SKIP_EXTRA_FRAMES", 0)
+                self._start_turn(self.pending_turn, entry, "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else ""),
+                                 edges)
             if cmd is None and self._turn is None and self._cross_frames and self._deferred_turn in ("LEFT", "RIGHT") \
                     and (state in (OFF_ROAD, LOST) or (edges and "GG" in edges)):
                 # 직진하다 앞이 막혔다 (T자 끝) -> 받아 둔 방향으로 바로 돈다

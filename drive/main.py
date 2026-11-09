@@ -196,6 +196,10 @@ class Recorder(threading.Thread):
 
 
 # ================================================================ 로그
+def cfg_dir(cfg):
+    return getattr(cfg, "LOG_DIR", "logs")
+
+
 class CsvLog:
     # fid: --record 로 저장한 이미지 파일 이름({fid:06d}.jpg)과 같은 번호. 이미지와 조향값을 짝짓는 데 쓴다.
     FIELDS = ["fid", "t", "state", "error", "steering", "throttle", "left", "right", "edges_found",
@@ -374,6 +378,8 @@ class Runner:
         for ev in self.signs.poll():
             print(f"[sign] {ev}")
             notes.append(f"sign {ev.cls} {ev.conf:.2f}")
+            if ev.kind == "TURN" and getattr(cfg, "SAVE_SIGN_SHOTS", True):
+                self._save_sign_shot(upright, ev, frame.fid)
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
@@ -478,6 +484,23 @@ class Runner:
         return True
 
     # ------------------------------------------------------------ 고정 주기 루프
+    def _save_sign_shot(self, upright, ev, fid):
+        """회전 표지판 이벤트가 날 때 지금 화면에 검출 상자를 그려 logs/sign_shots/ 에 저장한다.
+        (출발할 때 아무것도 없는데 right 를 본다는 경우, 무엇을 보고 그랬는지 확인용)"""
+        try:
+            d = ROOT / cfg_dir(self.cfg) / "sign_shots"
+            d.mkdir(parents=True, exist_ok=True)
+            img = cv2.resize(upright, tuple(self.cfg.CAMERA_SIZE)) if upright.shape[1] != self.cfg.CAMERA_SIZE[0] \
+                else upright.copy()
+            if ev.box:
+                x1, y1, x2, y2 = (int(round(v)) for v in ev.box)
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(img, f"{ev.cls} {ev.conf:.2f} det@{ev.frame_id} now@{fid}", (8, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.imwrite(str(d / f"{fid:06d}_{ev.cls}_{ev.conf:.2f}.jpg"), img)
+        except Exception as e:   # 저장 실패로 주행을 멈추지 않는다
+            print(f"[sign] 사진 저장 실패: {e}")
+
     def run(self):
         cfg = self.cfg
         period = 1.0 / cfg.LOOP_HZ

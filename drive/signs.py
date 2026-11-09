@@ -15,7 +15,7 @@ import queue
 import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class SignDetector:
@@ -63,6 +63,7 @@ class SignEvent:
     cls: str
     conf: float
     frame_id: int
+    box: tuple = field(default=None, repr=False)   # (x1, y1, x2, y2), 640x480 기준. 무엇을 보고 이벤트가 났는지 저장용
 
 
 class SignInterpreter:
@@ -159,7 +160,11 @@ class SignInterpreter:
                 continue
             self._last_fired[d["cls"]] = fid
             hits.clear()
-            events.append(SignEvent(spec[0], spec[1], d["cls"], d["conf"], fid))
+            box = None
+            if "box_cx" in d and "box_w" in d:
+                box = (d["box_cx"] - d["box_w"] / 2, d.get("box_y2", 0) - d["box_h"], d["box_cx"] + d["box_w"] / 2,
+                       d.get("box_y2", 0))
+            events.append(SignEvent(spec[0], spec[1], d["cls"], d["conf"], fid, box))
         return events
 
 
