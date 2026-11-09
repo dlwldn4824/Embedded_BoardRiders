@@ -199,6 +199,20 @@ class Controller:
             self._centering = abs(error) > getattr(cfg, "CENTER_START_ERROR", 0.15)
         return self._centering
 
+    def lane_offset(self):
+        """차선 안에서 설 자리 (+ 오른쪽, - 왼쪽, 오차 단위).
+        - 기본 LANE_OFFSET: 표지판은 오른쪽 길가에 있다. 왼쪽으로 치우치면 표지판·교차로를 놓쳤다 (실차)
+        - 회전이 정해지면 그쪽으로 TURN_PREP_OFFSET 만큼 붙는다 (왼쪽으로 돌 땐 왼쪽에 붙어야 잘 돈다)
+        - 회전 직후에는 0 (새 길 가운데를 먼저 잡는다)"""
+        cfg = self.cfg
+        if self._post_turn:
+            return 0.0
+        if self.pending_turn == "LEFT":
+            return -getattr(cfg, "TURN_PREP_OFFSET", 0.0)
+        if self.pending_turn == "RIGHT":
+            return getattr(cfg, "TURN_PREP_OFFSET", 0.0)
+        return getattr(cfg, "LANE_OFFSET", 0.0)
+
     def _spin_throttle(self, error, edges, n=0):
         """제자리 회전 세기. 한쪽 바퀴를 세우고 도는 4륜 차는 바퀴를 바닥에 끌어야 해서, 0.32 로는 도중에 멈출 수 있다
         (실차: 45도쯤에서 못 돎). 화면(오차·띠 경계)이 TURN_STUCK_FRAMES 동안 그대로면 멈춘 것으로 보고
@@ -396,6 +410,11 @@ class Controller:
                 elif (state in PID_STATES or self._post_turn) and error is not None:
                     if self._last_action != "PID":
                         self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
+                    # 차선 안에서 설 자리. 오차에 더하면 차가 그만큼 오른쪽(+)/왼쪽(-)에 선다
+                    offset = self.lane_offset()
+                    error = error + offset
+                    if near is not None:
+                        near = near + offset
                     steering = float(self.pid(-error, dt=self.dt))
                     if (state == ONE_SIDE and not self._post_turn and edges and len(edges) >= 3
                             and edges[1] == "--" and edges[2] == "--" and getattr(self.cfg, "HOLD_BEFORE_CROSS", True)):

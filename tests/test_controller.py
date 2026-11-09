@@ -547,3 +547,16 @@ def test_oblique_turn_sign_is_ignored():
     for fid in range(10, 20, 2):
         evs += it([{"cls": "right", "conf": 0.7, "box_h": 80, "box_w": 76, "box_cx": 400, "box_y2": 200, "frame_id": fid}])
     assert [e.value for e in evs] == ["RIGHT"]
+
+
+def test_lane_offset_follows_pending_turn():
+    # 평소 살짝 오른쪽, 좌회전이 정해지면 왼쪽, 우회전이면 오른쪽에 붙는다. 회전 직후에는 가운데
+    c = make()
+    assert c.lane_offset() == config.LANE_OFFSET
+    c.on_sign(ev("TURN", "LEFT"))
+    assert c.lane_offset() == -config.TURN_PREP_OFFSET
+    m = c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    assert m.steering < 0          # 가운데에 있어도 왼쪽으로 붙으려고 조향
+    c2 = make()
+    c2.on_sign(ev("TURN", "RIGHT"))
+    assert c2.lane_offset() == config.TURN_PREP_OFFSET
