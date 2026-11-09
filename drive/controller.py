@@ -75,6 +75,7 @@ class Controller:
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
+        self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
         self._deferred_turn = None  # 앞 표지판 방향을 쓰기 전에 본 다른 방향 (다음 교차로용)
@@ -172,6 +173,7 @@ class Controller:
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
 
     def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
+        self._done_run = 0
         self._turn = [direction, "ENTRY", 0, entry_frames or self.cfg.TURN_ENTRY_FRAMES]
         self.pending_turn = None
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
@@ -226,7 +228,10 @@ class Controller:
                 # 도로 중앙이 화면 가운데 근처면 회전을 끝낸다 (상태값은 3프레임 확인 때문에 늦어서 띠를 직접 본다)
                 done = (error is not None and edges is not None and len(edges) >= 3
                         and edges[1] == "LR" and edges[2] == "LR" and abs(error) < getattr(cfg, "TURN_DONE_ERROR", 0.35))
-                if done:
+                # 45도 근처에서는 교차로 대각선 너머 블록 두 개 사이가 잠깐 길처럼 보일 수 있다. 연속으로 보여야 끝낸다
+                self._done_run = self._done_run + 1 if done else 0
+                if self._done_run >= getattr(cfg, "TURN_DONE_CONFIRM", 3):
+                    self._done_run = 0
                     self._turn = None
                     self._side_closed = 0
                     self._post_turn = True   # 새 차선에 들어설 때까지는 새 회전을 시작하지 않고 PID 로 간다

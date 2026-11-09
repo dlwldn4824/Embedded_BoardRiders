@@ -115,8 +115,9 @@ def test_turn_sequence_at_intersection():
     spin = c.update(INTERSECTION, None)
     assert spin.action == "TURN" and spin.steering < 0       # SPIN: 왼쪽
     run(c, config.TURN_FRAMES - 1, INTERSECTION, None)
-    # 최소 회전 뒤, 새 길이 정면(중간·먼 띠 양쪽 경계)에 보이면 PID 로 넘어간다
-    assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
+    # 최소 회전 뒤, 새 길이 정면(중간·먼 띠 양쪽 경계)에 TURN_DONE_CONFIRM 프레임 연속 보이면 PID 로 넘어간다
+    acts = [c.update(LANE, 0.0, ["LR", "LR", "LR"]).action for _ in range(config.TURN_DONE_CONFIRM)]
+    assert acts[:-1] == ["TURN"] * (config.TURN_DONE_CONFIRM - 1) and acts[-1] == "PID"
     assert c.pending_turn is None
 
 
@@ -195,7 +196,19 @@ def test_spin_continues_until_new_road_is_ahead():
     for _ in range(config.TURN_ENTRY_FRAMES + config.TURN_FRAMES + 5):
         cmd = c.update(INTERSECTION, 0.8, ["L-", "L-", "L-"])
     assert cmd.action == "TURN" and cmd.steering < 0
-    assert c.update(ONE_SIDE, 0.05, ["L-", "LR", "LR"]).action == "PID"
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "LR", "LR"]).action for _ in range(config.TURN_DONE_CONFIRM)]
+    assert acts[-1] == "PID"
+
+
+def test_brief_road_glimpse_does_not_end_spin():
+    # 도는 중 대각선 너머가 한 프레임 길처럼 보여도 회전을 끝내지 않는다
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES + config.TURN_FRAMES, INTERSECTION, None)
+    assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "TURN"
+    assert c.update(INTERSECTION, None, ["--", "--", "--"]).action == "TURN"
+    assert c._turn is not None and c._turn[1] == "SPIN"
 
 
 def test_side_branch_already_open_when_sign_seen():

@@ -138,7 +138,8 @@ FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선�
 FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
 # 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
 TURN_ENTRY_FRAMES = 40          # 실차 속도(약 5cm/s, 17Hz)를 넣은 sim 에서 맞춘 값. 18 은 빠른 가상 차 기준이라 실차에서 너무 일찍 돌았다
-TURN_FRAMES = 12               # 최소 회전 프레임. 이후에는 새 길이 정면에 보일 때 끝낸다 (바닥에서 미끄러져 덜 돌아도 계속 돈다)
+TURN_FRAMES = 25               # 최소 회전 프레임 (실차 약 35도/s, 17Hz 에서 약 50도). 12 는 25도라 대각선을 새 길로 보고 끝낼 수 있었다
+TURN_DONE_CONFIRM = 3          # 새 길이 정면에 보이는 것이 이만큼 연속이어야 회전을 끝낸다
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
