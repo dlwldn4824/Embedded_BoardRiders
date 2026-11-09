@@ -115,6 +115,7 @@ class Controller:
         self._side_runs = {"-R": 0, "L-": 0}   # 그쪽이 열려 보인 프레임 수 (표지판과 상관없이)
         self._side_ages = {"-R": 0, "L-": 0}   # 열리기 시작한 뒤 지난 프레임
         self._side_late = 0         # 표지판보다 먼저 열려 있던 프레임 (그만큼 덜 직진)
+        self._side_real = {"-R": 0, "L-": 0}   # 이번 열림 동안 진짜 열림을 본 프레임
         self._unknown_runs = {"-R": 0, "L-": 0}   # 모든 띠에서 그쪽 경계가 안 보인 연속 프레임
         self._last_error = None
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
@@ -364,8 +365,10 @@ class Controller:
         return False
 
     def _side_ambiguous(self, opens):
-        unknown = "L?" if self.pending_turn == "RIGHT" else "?R"
-        return bool(opens) and all(e == unknown for e in opens[:2])
+        """이번 열림이 진짜 열림을 거의 못 보고 "모름"만으로 쌓였으면 경계로는 옆길 위치를 알 수 없다.
+        (실차 run_041701: 280 프레임 동안 오른쪽이 모두 "모름". sim 바깥 붙은 경우는 먼 띠에서 진짜 열림을 여러 번 본다)"""
+        pat = "L-" if self.pending_turn == "RIGHT" else "-R"
+        return self._side_real[pat] < getattr(self.cfg, "SIDE_REAL_MIN_FRAMES", 3)
 
     def _track_sides(self, seen, n):
         """양쪽(-R 왼쪽 열림, L- 오른쪽 열림)이 열려 보인 횟수와 열리기 시작한 뒤 지난 프레임을 센다.
@@ -377,6 +380,7 @@ class Controller:
                 state = False
             elif self._side_is_open(seen, pat, n):
                 state = True
+                self._side_real[pat] += 1      # 진짜 열림(경계가 있어야 할 자리가 화면 안인데 없음)을 본 프레임
             elif look[:n] and all(e == unknown for e in look[:n]):
                 state = None
             else:
@@ -392,7 +396,7 @@ class Controller:
             else:
                 self._unknown_runs[pat] = 0
             if state is False:
-                self._side_runs[pat] = self._side_ages[pat] = 0
+                self._side_runs[pat] = self._side_ages[pat] = self._side_real[pat] = 0
                 continue
             if state:
                 self._side_runs[pat] += 1
@@ -530,12 +534,17 @@ class Controller:
                     and self._side_branch(edges, opens):
                 # 먼 띠로 옆길을 알아봤으면(가까운 띠 "모름") 옆길이 그만큼 멀다 -> 더 직진 (SIDE_SKIP_EXTRA_FRAMES).
                 # 표지판보다 옆길이 먼저 열려 있었으면 그만큼 옆길에 가깝다 -> 덜 직진
-                entry = getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", 53) + \
-                    self._open_skip * getattr(self.cfg, "SIDE_SKIP_EXTRA_FRAMES", 0) - self._side_late
-                entry = max(getattr(self.cfg, "SIDE_MIN_ENTRY_FRAMES", 5), entry)
-                why = "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else "") + \
-                    (f" (표지판 전부터 열림 {self._side_late}프레임)" if self._side_late else "")
                 amb = self._side_ambiguous(opens)
+                late = self._side_late if self._side_late <= getattr(self.cfg, "SIDE_LATE_MAX_FRAMES", 40) else 0
+                entry = getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", 53) + \
+                    self._open_skip * getattr(self.cfg, "SIDE_SKIP_EXTRA_FRAMES", 0) - late
+                entry = max(getattr(self.cfg, "SIDE_MIN_ENTRY_FRAMES", 5), entry)
+                if amb:
+                    # 가까운·중간 띠 모두 "모름": 경계로는 옆길이 어디인지 모른다 (실차 run_041701: 표지판 전 280 프레임 동안
+                    # 오른쪽이 안 보였다). 표지판이 가까워질 때(SIGN_NEAR_TURN_H) 직진을 줄여 돈다. 안 커지면 이만큼 뒤에 돈다
+                    entry = getattr(self.cfg, "SIDE_AMBIG_ENTRY_FRAMES", 120)
+                why = "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else "") + \
+                    (f" (표지판 전부터 열림 {late}프레임)" if late else "") + (" (경계 모름: 표지판 크기로)" if amb else "")
                 self._start_turn(self.pending_turn, entry, why, edges)
                 self._turn_ambiguous = amb
             if cmd is None and self._turn is None and self._cross_frames and self._deferred_turn in ("LEFT", "RIGHT") \

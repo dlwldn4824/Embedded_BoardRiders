@@ -687,3 +687,20 @@ def test_close_sign_shortens_side_entry():
     c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 0, (500, 60, 563, 123)))
     acts = [c.update(INTERSECTION, None, ["--", "--", "--"]) for _ in range(config.SIGN_NEAR_ENTRY_FRAMES + 2)]
     assert acts[-1].steering > 0
+
+
+def test_ambiguous_wide_open_side_waits_for_close_sign():
+    # 실차 run_041701 (빨강): 오른쪽이 오래 "모름" -> 옆길 회전을 정해도 바로 돌지 않고, 표지판이 60px 를 넘을 때 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    for _ in range(300):
+        c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"], None, ["L?", "L?", "L?"])
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 0, (400, 70, 445, 115)))      # 45px
+    c.update(ONE_SIDE, 0.0, ["L-", "L-", "LR"], None, ["L?", "L?", "LR"])
+    assert c._turn is not None and c._turn[1] == "ENTRY" and c._turn[3] == config.SIDE_AMBIG_ENTRY_FRAMES
+    run(c, 30, INTERSECTION, None)
+    assert c._turn[1] == "ENTRY"                                                     # 아직 직진
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 0, (500, 60, 563, 123)))      # 63px
+    acts = [c.update(INTERSECTION, None, ["--", "--", "--"]) for _ in range(config.SIGN_NEAR_ENTRY_FRAMES + 2)]
+    assert acts[-1].steering > 0
