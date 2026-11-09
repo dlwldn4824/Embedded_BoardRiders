@@ -72,6 +72,7 @@ class SignInterpreter:
         self.cfg = cfg
         self._last_fired = {}
         self._hits = defaultdict(deque)   # 클래스별 조건을 통과한 frame_id
+        self._last_horn = None            # 마지막 경적 검출 (우회전으로 헷갈린 것 거르기)
 
     def _rule(self, cls):
         rule = {"min_conf": self.cfg.SIGN_MIN_CONF, "min_h": self.cfg.SIGN_MIN_BOX_H, "min_y2": 0}
@@ -91,6 +92,22 @@ class SignInterpreter:
         if len(turn) > 1:
             nearest = max(turn, key=lambda d: d["box_h"])
             detections = [d for d in detections if d not in turn or d is nearest]
+        # 경적(파란 원 + 나팔)을 가끔 우회전(파란 원 + 화살표)으로 본다. 경적이 HORN_CONFUSE_FRAMES 안에 보였던 자리에서
+        # 비슷한 크기의 회전 표지판이 보이면 같은 표지판으로 보고 버린다
+        for d in detections:
+            if d["cls"] == "horn" and d["conf"] >= self._rule("horn")["min_conf"]:
+                self._last_horn = d
+        h = self._last_horn
+        if h is not None and h.get("frame_id") is not None:
+            keep = []
+            for d in detections:
+                if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN" and d.get("frame_id") is not None \
+                        and 0 <= d["frame_id"] - h["frame_id"] <= getattr(cfg, "HORN_CONFUSE_FRAMES", 30) \
+                        and abs(d.get("box_cx", 0) - h.get("box_cx", 0)) < max(d.get("box_w", 0), h.get("box_w", 0), 1) \
+                        and 0.6 <= d["box_h"] / max(h["box_h"], 1) <= 1.7:
+                    continue
+                keep.append(d)
+            detections = keep
         for d in sorted(detections, key=lambda d: -d["conf"]):
             spec = cfg.SIGN_CLASS_EVENTS.get(d["cls"])
             if spec is None or d["cls"] in seen:

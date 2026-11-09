@@ -36,6 +36,24 @@ def near_error(res, cfg):
     return max(-1.0, min(1.0, e))
 
 
+def real_openings(res, cfg):
+    """띠마다 경계가 없는 쪽이 '진짜 열린 길'인지. 반대쪽 경계 + 평소 도로 폭으로 없는 경계가 있어야 할 자리를 구해,
+    그 자리가 화면 안쪽(SIDE_OPEN_MARGIN px 이상)인데 경계가 없으면 열린 길이다. 화면 밖이면 차가 비스듬하거나
+    한쪽에 붙어서 안 보이는 것이라 알 수 없다. 결과는 edges 와 같은 꼴: "L-" 은 오른쪽이 진짜 열림, "L?" 는 모름."""
+    w = cfg.PROC_SIZE[0]
+    margins = getattr(cfg, "SIDE_OPEN_MARGIN", (10, 30, 30))
+    out = []
+    for i, b in enumerate(res.bands):
+        m = margins[min(i, len(margins) - 1)]
+        e = b.edges
+        if e == "L-" and b.left is not None and b.learned:
+            e = "L-" if b.left + b.learned <= w - m else "L?"
+        elif e == "-R" and b.right is not None and b.learned:
+            e = "-R" if b.right - b.learned >= m else "?R"
+        out.append(e)
+    return out
+
+
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
@@ -76,6 +94,10 @@ class Controller:
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._centering = False     # 도로 가운데 찾기 모드
         self._post_dir = None       # 막 끝낸 회전 방향
+        self._stuck = 0             # 회전 중 화면이 그대로인 프레임 (차가 안 돎)
+        self._kick = 0              # 세게 미는 남은 프레임
+        self._last_view = None
+        self.notice = None          # main.py 가 로그로 찍고 지우는 알림
         self._since_cross = 0       # 마지막 교차로·회전 뒤 지난 프레임
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
@@ -171,16 +193,35 @@ class Controller:
             self._centering = abs(error) > getattr(cfg, "CENTER_START_ERROR", 0.15)
         return self._centering
 
+    def _spin_throttle(self, error, edges):
+        """제자리 회전 세기. 한쪽 바퀴를 세우고 도는 4륜 차는 바퀴를 바닥에 끌어야 해서, 0.32 로는 도중에 멈출 수 있다
+        (실차: 45도쯤에서 못 돎). 화면(오차·띠 경계)이 TURN_STUCK_FRAMES 동안 그대로면 멈춘 것으로 보고
+        TURN_KICK_FRAMES 동안 TURN_KICK_THROTTLE 로 민다. 세게 미는 시간을 짧게 두어 전압 강하를 줄인다."""
+        cfg = self.cfg
+        view = (None if error is None else round(error, 2), tuple(edges or ()))
+        self._stuck = self._stuck + 1 if view == self._last_view else 0
+        self._last_view = view
+        if self._kick == 0 and self._stuck >= getattr(cfg, "TURN_STUCK_FRAMES", 8):
+            self._kick = getattr(cfg, "TURN_KICK_FRAMES", 6)
+            self._stuck = 0
+            self.notice = f"회전 중 화면이 {getattr(cfg, 'TURN_STUCK_FRAMES', 8)} 프레임 그대로 -> 세게 밀기"
+        if self._kick > 0:
+            self._kick -= 1
+            return self._slow(getattr(cfg, "TURN_KICK_THROTTLE", 0.42))
+        return self._slow(cfg.TURN_THROTTLE)
+
     def _slow(self, throttle):
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
 
     def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
         self._done_run = 0
+        self._stuck = self._kick = 0
+        self._last_view = None
         self._turn = [direction, "ENTRY", 0, entry_frames or self.cfg.TURN_ENTRY_FRAMES]
         self.pending_turn = None
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
-    def _side_branch(self, edges):
+    def _side_branch(self, edges, opens=None):
         """T자·옆길 교차로: 한쪽 경계는 그대로인데 회전할 쪽만 열리면 비전은 ONE_SIDE 로 본다.
         회전 표지판을 본 직후(SIDE_TURN_WINDOW_FRAMES 안)에 그쪽이 SIDE_OPEN_FRAMES 연속 열리면 교차로로 본다.
         edges: 띠별 "LR"/"-R"/"L-"/"--" (가까운 띠 먼저)."""
@@ -213,7 +254,10 @@ class Controller:
         if self._side_closed < getattr(cfg, "SIDE_CLOSED_FRAMES", 5) and recent_cross:
             self._side_open = 0
             return False
-        self._side_open = self._side_open + 1 if all(e == open_pat for e in edges[:n]) else 0
+        # opens: real_openings() 결과. 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길로 세지 않는다. 경적을 우회전으로
+        # 잘못 봤을 때 오른쪽에 길이 없는데도 돌던 것을 막는다
+        seen = opens if opens is not None else edges
+        self._side_open = self._side_open + 1 if all(e == open_pat for e in seen[:n]) else 0
         return self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3)
 
     def _turning(self, state, error=None, edges=None):
@@ -254,7 +298,7 @@ class Controller:
                     if not no_road or n + 1 >= getattr(cfg, "TURN_SPIN_HARD_MAX_FRAMES", 120):
                         self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
-            return Command(throttle=self._slow(cfg.TURN_THROTTLE), steering=s, action="TURN")
+            return Command(throttle=self._spin_throttle(error, edges), steering=s, action="TURN")
         # EXIT
         if state in PID_STATES:
             self._turn = None
@@ -289,7 +333,7 @@ class Controller:
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 self._wait = None
 
-    def update(self, state: Optional[str], error: Optional[float], edges=None, near=None) -> Command:
+    def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None) -> Command:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         horn = self._horn_frames > 0
         if horn:
@@ -322,7 +366,7 @@ class Controller:
                     self._post_turn = False
                     self._side_closed = 0
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
-                    and self._side_branch(edges):
+                    and self._side_branch(edges, opens):
                 self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None), "옆길", edges)
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)

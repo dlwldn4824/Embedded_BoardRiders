@@ -413,3 +413,74 @@ def test_open_side_right_after_intersection_is_not_a_branch():
     assert c.pending_turn == "RIGHT"
     acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"]).action for _ in range(20)]
     assert "TURN" not in acts
+
+
+def test_kick_when_spin_is_stuck():
+    # 회전 중 화면이 그대로면(차가 블록 앞에서 멈춤) 잠깐 세게 민 뒤 원래 세기로 돌아온다
+    from drive.vision import OFF_ROAD
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES, INTERSECTION, None)
+    thr = [c.update(OFF_ROAD, 0.197, ["LR", "LR", "LR"]).throttle for _ in range(40)]
+    first = thr.index(config.TURN_KICK_THROTTLE)
+    kick = thr[first:first + config.TURN_KICK_FRAMES]
+    assert kick == [config.TURN_KICK_THROTTLE] * config.TURN_KICK_FRAMES          # 짧게만
+    assert thr[first + config.TURN_KICK_FRAMES] == config.TURN_THROTTLE           # 다시 원래 세기
+    assert c.notice
+
+
+def test_no_kick_while_view_changes():
+    # 실제로 돌고 있으면(화면이 바뀜) 세게 밀지 않는다
+    from drive.vision import OFF_ROAD
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    run(c, config.TURN_ENTRY_FRAMES, INTERSECTION, None)
+    thr = [c.update(OFF_ROAD, 0.1 + 0.03 * i, ["LR", "LR", "LR"]).throttle for i in range(20)]
+    assert max(thr) == config.TURN_THROTTLE
+
+
+def test_no_side_turn_when_missing_edge_is_just_off_screen():
+    # 오른쪽 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길이 아니다. 경적을 우회전으로 잘못 봐도 돌지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"], None, ["L?", "L?", "L?"]).action for _ in range(30)]
+    assert "TURN" not in acts
+    acts = [c.update(ONE_SIDE, 0.05, ["L-", "L-", "L-"], None, ["L-", "L-", "L-"]).action
+            for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN"
+
+
+def test_real_openings_uses_expected_edge_position():
+    from types import SimpleNamespace as NS
+    from drive.controller import real_openings
+    b = lambda e, l, r, learned: NS(edges=e, left=l, right=r, learned=learned)
+    # 실차 오른쪽 옆길: 왼쪽 32 + 폭 264 = 296 < 320-10 -> 진짜 열림
+    assert real_openings(NS(bands=[b("L-", 32, None, 264)]), config) == ["L-"]
+    # 왼쪽에 붙음: 왼쪽 80 + 264 = 344 > 320 -> 오른쪽 경계는 화면 밖일 뿐
+    assert real_openings(NS(bands=[b("L-", 80, None, 264)]), config) == ["L?"]
+    # 커브: 오른쪽 236 - 264 < 0 -> 왼쪽 경계는 화면 밖
+    assert real_openings(NS(bands=[b("-R", None, 236, 264)]), config) == ["?R"]
+
+
+def test_turn_sign_at_horn_position_is_dropped():
+    # 경적이 보였던 자리에서 곧 비슷한 크기의 우회전이 보이면 같은 경적 표지판으로 본다
+    it = SignInterpreter(config)
+    evs = []
+    for fid in range(0, 12, 2):
+        evs += it([{"cls": "horn", "conf": 0.7, "box_h": 50, "box_w": 50, "box_cx": 500, "box_y2": 200, "frame_id": fid}])
+    for fid in range(12, 30, 2):
+        evs += it([{"cls": "right", "conf": 0.6, "box_h": 55, "box_w": 52, "box_cx": 510, "box_y2": 210, "frame_id": fid}])
+    assert not [e for e in evs if e.kind == "TURN"]
+
+
+def test_turn_sign_elsewhere_after_horn_is_kept():
+    it = SignInterpreter(config)
+    it([{"cls": "horn", "conf": 0.7, "box_h": 50, "box_w": 50, "box_cx": 500, "box_y2": 200, "frame_id": 0}])
+    evs = []
+    for fid in range(2, 10, 2):
+        evs += it([{"cls": "right", "conf": 0.8, "box_h": 60, "box_w": 55, "box_cx": 150, "box_y2": 220, "frame_id": fid}])
+    assert [e.value for e in evs] == ["RIGHT"]

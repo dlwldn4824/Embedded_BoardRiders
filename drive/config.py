@@ -114,6 +114,7 @@ SIGN_CLASS_RULES = {            # 클래스별로 다르게 둘 값만 적는다
 }
 SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레임 안에서 이만큼 검출돼야 이벤트
 SIGN_CONFIRM_WINDOW = 15
+HORN_CONFUSE_FRAMES = 30        # 경적이 보였던 자리에서 이 프레임 안에 보인 비슷한 크기의 회전 표지판은 경적으로 본다
 SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까지 기다릴 프레임 수
 SIGN_IMGSZ = 320                # YOLO 입력 크기. Pi 는 weights/sign_v3_26n_320_int8.tflite (320). 640 모델이면 640 과 CAMERA_CAPTURE_SIZE (640, 480)
 # YOLO 를 돌리는 최소 간격(초). 매 프레임 돌리면 CPU 4코어가 꽉 차 전력이 모자랄 수 있다.
@@ -142,6 +143,9 @@ TURN_FRAMES = 25               # 최소 회전 프레임 (실차 약 35도/s, 17
 TURN_DONE_CONFIRM = 3          # 새 길이 정면에 보이는 것이 이만큼 연속이어야 회전을 끝낸다
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
+TURN_STUCK_FRAMES = 8           # 회전 중 화면이 이만큼 그대로면 차가 안 도는 것 (바퀴를 끌다 멈춤)
+TURN_KICK_THROTTLE = 0.42       # 그때 잠깐 미는 세기. 0.4 를 계속 쓰면 Pi 가 꺼졌으므로 짧게만
+TURN_KICK_FRAMES = 6            # 약 0.35 초
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
 TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안 보이면 이만큼까지 계속 돈다 (3초)
 TURN_SPIN_HARD_MAX_FRAMES = 120 # 화면에 도로가 하나도 없으면(블록 초록만) 직진으로 넘어가지 않고 이만큼까지 돈다
@@ -157,6 +161,7 @@ SIDE_OPEN_BANDS = 2
 SIDE_OPEN_FRAMES = 10            # 3 이면 왼쪽 선에 붙어 가다 잠깐 틀어져 오른쪽 경계가 화면 밖으로 나간 것도 옆길로 볼 수 있다
 SIDE_CLOSED_FRAMES = 5          # 열리기 전에 양쪽 경계가 이만큼 보여야 한다 (교차로를 막 나올 때 오작동 방지)
 SIDE_AFTER_CROSS_FRAMES = 60    # 교차로·회전 뒤 이만큼 지났으면 양쪽 경계 기록 없이도 열린 쪽을 옆길로 본다
+SIDE_OPEN_MARGIN = (10, 30, 30) # 띠별: 없는 경계가 있어야 할 자리가 화면 안쪽으로 이만큼(px, 320 기준) 들어와야 진짜 열린 길
 SIDE_OPEN_MAX_AGE = 40          # 표지판을 보기 전에 이미 열려 있던 옆길도 인정하는 기간 (2초). 더 오래 열려 있었으면 무시
 SIDE_TURN_ENTRY_FRAMES = 53     # 옆길 회전을 정한 뒤 직진할 프레임. 실차 속도 sim 에서 열림 확인까지 합쳐 63 프레임이 가장 좋았다 (SIDE_OPEN_FRAMES 를 늘린 만큼 줄임)
 
