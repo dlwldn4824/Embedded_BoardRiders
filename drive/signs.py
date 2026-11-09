@@ -85,6 +85,18 @@ class SignInterpreter:
         window = getattr(cfg, "SIGN_CONFIRM_WINDOW", 0)
         events = []
         seen = set()
+        # 화면 왼쪽·오른쪽 끝에 걸려 잘린 회전 표지판은 방향을 잘못 읽는다 (실차: 왼쪽 끝에 반쯤 걸린 경적을
+        # right 로 봄). 상자가 끝에서 SIGN_EDGE_MARGIN px 안에 닿으면 버린다. 기준 폭은 검출기 기준 화면(640)
+        ref_w = cfg.CAMERA_SIZE[0]
+        m = getattr(cfg, "SIGN_EDGE_MARGIN", 4)
+
+        def cut(d):
+            if "box_cx" not in d or "box_w" not in d:
+                return False
+            return d["box_cx"] - d["box_w"] / 2 <= m or d["box_cx"] + d["box_w"] / 2 >= ref_w - m
+
+        detections = [d for d in detections
+                      if not (cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN" and cut(d))]
         # 회전 표지판이 한 화면에 여럿 보이면 가장 큰 것(가장 가까운 것)만 센다. 먼 교차로의 표지판이
         # 가까운 표지판보다 먼저 이벤트가 되어 방향이 바뀌는 것을 막는다
         turn = [d for d in detections if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN"

@@ -484,3 +484,15 @@ def test_turn_sign_elsewhere_after_horn_is_kept():
     for fid in range(2, 10, 2):
         evs += it([{"cls": "right", "conf": 0.8, "box_h": 60, "box_w": 55, "box_cx": 150, "box_y2": 220, "frame_id": fid}])
     assert [e.value for e in evs] == ["RIGHT"]
+
+
+def test_turn_sign_cut_at_frame_edge_is_ignored():
+    # 실차: 화면 왼쪽 끝에 반쯤 걸린 경적을 right 로 봄 (상자 x 0~29). 끝에 닿은 회전 표지판은 버린다
+    it = SignInterpreter(config)
+    evs = []
+    for fid in range(0, 10, 2):
+        evs += it([{"cls": "right", "conf": 0.7, "box_h": 102, "box_w": 29, "box_cx": 14.5, "box_y2": 169, "frame_id": fid}])
+    assert evs == []
+    for fid in range(10, 20, 2):   # 화면 안으로 다 들어오면 받는다
+        evs += it([{"cls": "right", "conf": 0.7, "box_h": 90, "box_w": 70, "box_cx": 120, "box_y2": 200, "frame_id": fid}])
+    assert [e.value for e in evs] == ["RIGHT"]
