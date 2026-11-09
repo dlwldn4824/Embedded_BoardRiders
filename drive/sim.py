@@ -35,13 +35,14 @@ from drive.main import ROOT, CsvLog, MOVING_ACTIONS, Recorder, _text, draw_mask,
 from drive.motors import Car
 
 # ---------------------------------------------------------------- 트랙 (cm)
-# 도로 30cm, 녹색 블록 60cm로 잡았다. 바깥 테두리 안에 블록 4개, 길은 3x3 격자.
+# 실습 트랙 도면(200x200cm, 블록 60cm, 테두리 10cm, 도로 20cm)을 따랐다. 블록 4개, 길은 3x3 격자.
+# (예전에는 작년 포스터를 보고 도로 30cm, 트랙 250cm로 추정했다.)
 PX_PER_CM = 2
-BORDER = 20            # 바깥 녹색 테두리 폭
-ROAD = 30              # 도로 폭 (녹색 경계 사이, 노란 선 포함)
+BORDER = 10            # 바깥 녹색 테두리 폭
+ROAD = 20              # 도로 폭 (녹색 경계 사이, 노란 선 포함)
 BLOCK = 60             # 안쪽 녹색 블록 한 변
-CURVE_RADIUS = 25      # 바깥 커브 안쪽 반지름 (구석 블록의 바깥 모서리). 바깥쪽은 이 값 + ROAD
-CORNER_RADIUS = 10     # 나머지 블록 모서리 반지름
+CURVE_RADIUS = 17      # 바깥 커브 안쪽 반지름 (구석 블록의 바깥 모서리). 바깥쪽은 이 값 + ROAD
+CORNER_RADIUS = 7      # 나머지 블록 모서리 반지름
 LINE_W = 1.5           # 녹색 경계를 따라 도로 쪽에 그린 노란 선 폭
 MARGIN = 60            # 트랙 밖 바닥
 TRACK = 2 * BORDER + 3 * ROAD + 2 * BLOCK
@@ -61,7 +62,7 @@ BODY_PART = (40, 200, 220)
 CAM_W, CAM_H = config.CAMERA_SIZE
 CAM_FOCAL = 320.0      # px. 수평 화각 약 90도
 CAM_PITCH_DEG = 13.4   # 아래로 기울어진 각도. 소실점이 y=164(320x240 기준 82)에 오는 값
-CAM_HEIGHT = 13.2      # cm. 도로 30cm가 가까운 띠에서 264px가 되는 값
+CAM_HEIGHT = 8.8       # cm. 도로 20cm가 가까운 띠에서 264px가 되는 값 (실제 사진의 도로 폭 픽셀)
 CAM_FORWARD = 5.0      # 바퀴 축 중심에서 카메라까지 앞쪽 거리 cm
 CAM_MAX_DIST = 400.0   # 이보다 먼 바닥은 벽으로 칠한다
 NOISE_SIGMA = 5.0      # 픽셀 잡음 표준편차
@@ -78,10 +79,10 @@ SUBSTEPS = 5
 _MID = BORDER + ROAD + BLOCK + ROAD / 2            # 가운데 세로/가로 도로 중심선
 _BOTTOM = TRACK - BORDER - ROAD / 2                 # 아래쪽 바깥 도로 중심선
 STARTS = {
-    "outer": (70.0, _BOTTOM, 0.0),                  # 아래 바깥 도로, 동쪽으로
-    "cross": (_MID, _BOTTOM - 25, -90.0),           # 가운데 세로 도로, 교차로를 향해 북쪽으로
-    "corner": (170.0, _BOTTOM, 0.0),                # 오른쪽 아래 커브 바로 앞
-    "offset": (70.0, _BOTTOM + 8, -15.0),           # 테두리 쪽으로 8cm 치우치고 15도 틀어짐
+    "outer": (50.0, _BOTTOM, 0.0),                  # 아래 바깥 도로, 동쪽으로
+    "cross": (_MID, _BOTTOM - 20, -90.0),           # 가운데 세로 도로, 교차로를 향해 북쪽으로
+    "corner": (140.0, _BOTTOM, 0.0),                # 오른쪽 아래 커브 앞
+    "offset": (50.0, _BOTTOM + 5, -15.0),           # 테두리 쪽으로 5cm 치우치고 15도 틀어짐
 }
 
 
@@ -132,17 +133,12 @@ def build_track():
     inner = cv2.erode(road, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     img[(road > 0) & (inner == 0)] = YELLOW
 
-    # 가운데 교차로로 들어가는 네 도로의 횡단보도. 들어오는 차의 오른쪽 블록에 파란 원
-    c0, c1 = BORDER + ROAD + BLOCK, BORDER + 2 * ROAD + BLOCK       # 가운데 교차로 범위
-    sw, gap, length, n = 3.5, 2.5, 12, 5
-    first = c0 + (ROAD - (n * sw + (n - 1) * gap)) / 2
-    crossings = {   # 방향: (횡단보도 시작, 세로 도로 위인지, 파란 원 위치)
-        "N": (c0 - 8 - length, True, (c0 - 12, c0 - 8 - length / 2)),
-        "S": (c1 + 8, True, (c1 + 12, c1 + 8 + length / 2)),
-        "W": (c0 - 8 - length, False, (c0 - 8 - length / 2, c1 + 12)),
-        "E": (c1 + 8, False, (c1 + 8 + length / 2, c0 - 12)),
-    }
-    for a0, vertical, (bx, by) in crossings.values():
+    # 횡단보도 (도면 위치): 가운데 교차로로 들어가는 네 도로 + 바깥 도로 네 곳. 가운데 것은 들어오는 차의 오른쪽 블록에 파란 원
+    sw, gap, length, n = 2.5, 1.8, 8, 4
+    span = n * sw + (n - 1) * gap
+
+    def crossing(a0, vertical, road_lo):
+        first = road_lo + (ROAD - span) / 2
         for i in range(n):
             b0 = first + i * (sw + gap)
             if vertical:
@@ -150,7 +146,20 @@ def build_track():
             else:
                 p, q = (_px(a0), _px(b0)), (_px(a0 + length), _px(b0 + sw))
             cv2.rectangle(img, p, q, WHITE, -1)
-        cv2.circle(img, (_px(bx), _px(by)), int(6 * PX_PER_CM), BLUE, -1, cv2.LINE_AA)
+
+    c0, c1 = BORDER + ROAD + BLOCK, BORDER + 2 * ROAD + BLOCK       # 가운데 교차로 범위
+    for a0, vertical, (bx, by) in (
+            (c0 - 5 - length, True, (c0 - 8, c0 - 5 - length / 2)),
+            (c1 + 5, True, (c1 + 8, c1 + 5 + length / 2)),
+            (c0 - 5 - length, False, (c0 - 5 - length / 2, c1 + 8)),
+            (c1 + 5, False, (c1 + 5 + length / 2, c0 - 8))):
+        crossing(a0, vertical, c0)
+        cv2.circle(img, (_px(bx), _px(by)), int(4 * PX_PER_CM), BLUE, -1, cv2.LINE_AA)
+    near, far = BORDER, TRACK - BORDER - ROAD                      # 바깥 도로 (위/왼쪽, 아래/오른쪽)
+    crossing(45, False, near)                 # 위 바깥 도로, 왼쪽
+    crossing(45, True, far)                   # 오른쪽 바깥 도로, 위쪽
+    crossing(TRACK - 45 - length, False, far)  # 아래 바깥 도로, 오른쪽
+    crossing(TRACK - 45 - length, True, near)  # 왼쪽 바깥 도로, 아래쪽
     return img, road
 
 
@@ -413,7 +422,7 @@ def parse_args(argv=None):
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
     p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
                    help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
-    p.add_argument("--signs", choices=["mission", "left"],
+    p.add_argument("--signs", choices=["mission", "left", "side_left"],
                    help="가상 표지판 시나리오 (drive/sim_signs.py). mission 은 --start cross 로")
     p.add_argument("--sign-latency", type=float, default=0.0,
                    help="표지판 검출 지연 초 (Pi 의 YOLO 추론 시간). 검출 주기도 이만큼 길어진다")

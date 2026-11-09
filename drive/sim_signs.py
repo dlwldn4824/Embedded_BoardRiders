@@ -156,21 +156,23 @@ class SimSigns:
 
 
 # ---------------------------------------------------------------- 시나리오 (트랙 좌표 cm, sim.py 트랙 기준)
-# 도로 중심선: 바깥 x/y = 35, 215 / 가운데 x/y = 125. 가운데 교차로는 110~140.
-# 기둥 표지판은 차가 오는 방향의 오른쪽 길가(도로 중심에서 20cm)에 둔다.
+# 실습 트랙 도면(200x200cm): 도로 중심선 바깥 x/y = 20, 180 / 가운데 x/y = 100. 가운데 교차로는 90~110.
+# 기둥 표지판은 차가 오는 방향의 오른쪽 길가(도로 중심에서 15cm)에 둔다.
 SCENARIOS = {
     # --start cross. 빨간불(6초 뒤 초록) + 좌회전 → T자에서 우회전 → 서행 → 정지 표지판 → 정지선 도착
     "mission": [
-        # 출발점이 교차로 50cm 앞이라, 신호등과 방향 표지판은 교차로 오른쪽 앞 모서리에 둔다
+        # 출발점이 교차로 앞이라, 신호등과 방향 표지판은 교차로 오른쪽 앞 모서리에 둔다
         # 진행 방향(for_heading): 0 = 동, 90 = 남, 180 = 서, -90 = 북
-        VirtualSign("green_light", 148, 140, schedule=[(6.0, "red_light")], for_heading=-90),  # 6초까지 빨간불
-        VirtualSign("left", 148, 130, for_heading=-90),
-        VirtualSign("right", 60, 105, for_heading=180),
-        VirtualSign("speed_20", 55, 85, for_heading=-90),
-        # 커브 바로 뒤(x≈95)에 두면 차가 비스듬할 땐 화면 밖, 정면일 땐 너무 가까워서 못 본다. 위쪽 직선 뒤쪽에 둔다
-        VirtualSign("stop", 150, 55, for_heading=0),
-        VirtualSign("red_line", 178, 35, floor=True, width=30, heading_deg=90),
+        VirtualSign("green_light", 116, 114, schedule=[(6.0, "red_light")], for_heading=-90),  # 6초까지 빨간불
+        VirtualSign("left", 116, 106, for_heading=-90),
+        VirtualSign("right", 42, 86, for_heading=180),
+        VirtualSign("speed_20", 35, 66, for_heading=-90),
+        # 커브 바로 뒤에 두면 차가 비스듬할 땐 화면 밖, 정면일 땐 너무 가까워서 못 본다. 위쪽 직선 뒤쪽에 둔다
+        VirtualSign("stop", 120, 35, for_heading=0),
+        VirtualSign("red_line", 148, 20, floor=True, width=20, heading_deg=90),
     ],
     # --start cross. 좌회전 표지판 하나만 (회전 타이밍만 보기)
-    "left": [VirtualSign("left", 148, 130, for_heading=-90)],
+    "left": [VirtualSign("left", 116, 106, for_heading=-90)],
+    # --start outer. 바깥 아래 도로에서 옆길(가운데 세로 도로)로 좌회전
+    "side_left": [VirtualSign("left", 80, 195, for_heading=0)],
 }

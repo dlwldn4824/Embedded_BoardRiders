@@ -126,8 +126,8 @@ LIGHT_MAX_WAIT_FRAMES = 400     # 빨간불 최대 대기 (20초). 초록불을 
 FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선을 무시 (출발 지점의 선)
 FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
 # 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
-TURN_ENTRY_FRAMES = 40
-TURN_FRAMES = 25               # TURN_THROTTLE 을 낮춘 만큼 회전 시간을 늘림 (sim 좌·우·직진 통과)
+TURN_ENTRY_FRAMES = 18          # 실제 트랙(도로 20cm) 기준 sim 에서 맞춘 값. 예전 40 은 도로 30cm 로 추정한 트랙 기준이었다
+TURN_FRAMES = 23               # 실제 트랙 기준 sim: 진입 15~20, 회전 20~25 구간에서 좌·우·직진 모두 통과
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
@@ -138,7 +138,7 @@ SIDE_TURN_WINDOW_FRAMES = 100   # 5초
 SIDE_OPEN_BANDS = 2
 SIDE_OPEN_FRAMES = 3
 SIDE_CLOSED_FRAMES = 5          # 열리기 전에 양쪽 경계가 이만큼 보여야 한다 (교차로를 막 나올 때 오작동 방지)
-SIDE_TURN_ENTRY_FRAMES = 40     # 열린 것을 본 뒤 옆길 가운데까지 직진할 프레임 (실차에서 맞춘다)
+SIDE_TURN_ENTRY_FRAMES = 16     # 옆길이 열린 것을 본 뒤 직진할 프레임 (실제 트랙 기준 sim 6~26 모두 통과, 가운데 값)
 
 # ---------------------------------------------------------------- 화면 / 기록
 DISPLAY_SCALE = 2               # 오버레이 창 확대 배율

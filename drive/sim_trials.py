@@ -21,8 +21,9 @@ from drive import sim
 from drive import sim_sweep
 
 TARGET_DEG = {"LEFT": 180.0, "RIGHT": 0.0, "STRAIGHT": -90.0}
-BASE = {"pos": 5.0, "dist": 8.0, "deg": 10.0, "gain": 0.07, "light": 0.2}
-STRESS = {"pos": 10.0, "dist": 8.0, "deg": 20.0, "gain": 0.15, "light": 0.2}
+# 도로 20cm 트랙 기준. 위치 ±3cm 는 도로 폭의 15%
+BASE = {"pos": 3.0, "dist": 5.0, "deg": 10.0, "gain": 0.07, "light": 0.2}
+STRESS = {"pos": 6.0, "dist": 5.0, "deg": 20.0, "gain": 0.15, "light": 0.2}
 
 
 def _angdiff(a, b):
