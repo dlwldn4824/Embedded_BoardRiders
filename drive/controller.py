@@ -58,6 +58,7 @@ class Controller:
         self._pending_age = 0       # pending_turn 을 받은 뒤 지난 프레임
         self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
+        self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
         self._post_turn = False  # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
         self._post_lane = self._post_frames = 0
         self._open_run = 0          # 가까운 띠가 연속으로 양쪽 경계가 아닌 프레임
@@ -123,9 +124,10 @@ class Controller:
     def _slow(self, throttle):
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
 
-    def _start_turn(self, direction, entry_frames=None):
+    def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
         self._turn = [direction, "ENTRY", 0, entry_frames or self.cfg.TURN_ENTRY_FRAMES]
         self.pending_turn = None
+        self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
     def _side_branch(self, edges):
         """T자·옆길 교차로: 한쪽 경계는 그대로인데 회전할 쪽만 열리면 비전은 ONE_SIDE 로 본다.
@@ -255,7 +257,7 @@ class Controller:
                     self._side_closed = 0
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._side_branch(edges):
-                self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None))
+                self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None), "옆길", edges)
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
             if state == INTERSECTION:

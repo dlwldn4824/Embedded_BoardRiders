@@ -269,3 +269,15 @@ def test_no_new_turn_until_new_lane_after_turn():
     for _ in range(config.POST_TURN_LANE_FRAMES if hasattr(config, "POST_TURN_LANE_FRAMES") else 8):
         c.update(LANE, 0.0, ["LR", "LR", "LR"])
     assert not c._post_turn and c.pending_turn == "RIGHT"
+
+
+def test_brief_edge_loss_is_not_a_side_branch():
+    # 왼쪽 선에 붙어 가다 잠깐 틀어져 중간 띠의 오른쪽 경계가 몇 프레임 화면 밖으로 나가도 우회전하지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = []
+    for _ in range(3):
+        acts += [c.update(ONE_SIDE, 0.0, ["L-", "LR", "LR"]).action for _ in range(10)]
+        acts += [c.update(ONE_SIDE, 0.0, ["L-", "L-", "LR"]).action for _ in range(config.SIDE_OPEN_FRAMES - 1)]
+    assert "TURN" not in acts
