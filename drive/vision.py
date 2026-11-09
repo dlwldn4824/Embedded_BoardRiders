@@ -219,7 +219,10 @@ class LaneDetector:
         if valid:
             total = sum(b.weight for b in valid)
             res.center = sum(b.center * b.weight for b in valid) / total
-            res.error = float(np.clip((res.center - w / 2.0) / (w / 2.0), -1.0, 1.0))
+            # LANE_CENTER_OFFSET: 차를 도로 한가운데에 똑바로 놓았을 때 화면에 나오는 오차. 카메라가 차 중심에서
+            # 비껴 달렸거나 살짝 돌아가 있으면 0 이 아니고, 그만큼 차가 한쪽 선에 붙어 간다
+            res.error = float(np.clip((res.center - w / 2.0) / (w / 2.0) - getattr(self.cfg, "LANE_CENTER_OFFSET", 0.0),
+                                      -1.0, 1.0))
         for i, b in enumerate(bands):
             if b.center is not None:
                 self._starts[i] = b.center

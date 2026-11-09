@@ -84,6 +84,13 @@ class SignInterpreter:
         window = getattr(cfg, "SIGN_CONFIRM_WINDOW", 0)
         events = []
         seen = set()
+        # 회전 표지판이 한 화면에 여럿 보이면 가장 큰 것(가장 가까운 것)만 센다. 먼 교차로의 표지판이
+        # 가까운 표지판보다 먼저 이벤트가 되어 방향이 바뀌는 것을 막는다
+        turn = [d for d in detections if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN"
+                and d["conf"] >= self._rule(d["cls"])["min_conf"]]
+        if len(turn) > 1:
+            nearest = max(turn, key=lambda d: d["box_h"])
+            detections = [d for d in detections if d not in turn or d is nearest]
         for d in sorted(detections, key=lambda d: -d["conf"]):
             spec = cfg.SIGN_CLASS_EVENTS.get(d["cls"])
             if spec is None or d["cls"] in seen:

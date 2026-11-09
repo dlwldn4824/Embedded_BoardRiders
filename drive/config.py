@@ -52,6 +52,17 @@ LOOP_HZ = 20                  # 주행 루프 주기 고정 (PID D항이 주기�
 PID_P = 1.5                   # 1.3 에서 올림: 실차 커브 출구에서 바깥쪽에 붙었다. 좌우로 흔들리면 낮춘다
 PID_I = 0.0
 PID_D = 0.0
+# 차를 도로 한가운데에 똑바로 놓고 python3 -m drive.main --mode dry 화면의 err 값을 읽어 넣는다 (예: err +0.12 면 0.12).
+# 실차는 직선에서도 한쪽 선에 붙어 갔다. 카메라가 비껴 달린 만큼을 빼 준다
+LANE_CENTER_OFFSET = 0.0
+# 가운데 찾기: 곧은 길에서 차가 가운데를 벗어나면(추정 치우침 > START) 천천히 가며 치우침으로 조향해 먼저 가운데로 돌아온다.
+# 실차 속도 sim 에서는 켜도 가운데로 오는 거리가 같고(20~40cm) 바퀴가 선을 넘는 프레임만 늘어 기본은 끈다. 실차에서 시험용
+CENTER_FIRST = False
+CENTER_START_ERROR = 0.15       # 가까운 띠 기준 약 2cm
+CENTER_DONE_ERROR = 0.06
+CENTER_GAIN = 1.5
+CENTER_EXTRAP = 0.5            # 가까운·중간 띠 도로 중앙을 이은 선을 차 쪽으로 늘리는 비율 (차 위치 추정)
+CENTER_THROTTLE = 0.28          # MIN_THROTTLE. 이보다 낮으면 바퀴가 멈춘다
 BASE_THROTTLE = 0.3            # 0.35 는 출발 때 Pi 가 꺼졌다. 커브는 SLOW_K 로 바깥 바퀴를 더 밀어 보완
 SLOW_K = -0.4                 # 조향 비례 속도: BASE * (1 - SLOW_K * |steering|). 음수면 커브에서 바깥 바퀴가 빨라져 더 빨리 돈다
 # 모터가 실제로 도는 최소 PWM. 바퀴를 띄우고 `python3 -m drive.motors --sweep`으로
@@ -136,6 +147,7 @@ TURN_DONE_ERROR = 0.35          # 회전 끝 판정: 양쪽 경계가 보이고(
 # T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
 # 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
 # SIDE_OPEN_FRAMES 연속 사라지면 회전을 시작한다. 0 이면 끈다. 바깥 커브도 한쪽이 열려 보이므로 창을 짧게 둔다.
+PENDING_STALE_FRAMES = 200      # 정한 방향의 표지판을 이만큼(약 12초) 다시 못 봤고 교차로도 없었으면, 받아 둔 다른 방향으로 바꾼다
 SIDE_TURN_WINDOW_FRAMES = 150   # 표지판을 마지막으로 본 뒤 약 9초 (실차가 느려서 100 은 옆길 전에 끝났다)
 SIDE_OPEN_BANDS = 2
 SIDE_OPEN_FRAMES = 10            # 3 이면 왼쪽 선에 붙어 가다 잠깐 틀어져 오른쪽 경계가 화면 밖으로 나간 것도 옆길로 볼 수 있다

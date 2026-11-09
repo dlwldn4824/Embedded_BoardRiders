@@ -32,7 +32,7 @@ import numpy as np
 
 from drive import config
 from drive import vision
-from drive.controller import Command, Controller
+from drive.controller import Command, Controller, near_error
 from drive.signs import NullSignDetector, SignInterpreter, SignWorker
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -375,7 +375,7 @@ class Runner:
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
-        self.cmd = ctrl.update(res.state, res.error, [b.edges for b in res.bands])
+        self.cmd = ctrl.update(res.state, res.error, [b.edges for b in res.bands], near_error(res, cfg))
         if ctrl.turn_started:   # 왜 돌기 시작했는지 남긴다 (교차로 / 옆길, 그때 띠 경계)
             d, why, edges = ctrl.turn_started
             print(f"[turn] frame={frame.fid} {d} ({why}) state={res.state} edges={edges}")

@@ -21,6 +21,21 @@ from drive.vision import INTERSECTION, LANE, ONE_SIDE
 PID_STATES = (LANE, ONE_SIDE)
 
 
+def near_error(res, cfg):
+    """차가 도로 가운데에서 얼마나 벗어났는지 추정 (-1~1, 가까운 띠 화면 폭 기준). 없으면 None.
+    카메라는 앞만 본다. 차가 가운데 쪽으로 비스듬히 향하면 가까운 띠의 도로 중앙은 화면 가운데에 와도 차는 아직
+    치우쳐 있다. 그래서 가까운 띠와 중간 띠의 도로 중앙을 이은 선을 차 쪽으로 CENTER_EXTRAP 배 연장한다."""
+    if not res.bands or res.bands[0].center is None:
+        return None
+    half = cfg.PROC_SIZE[0] / 2.0
+    e_near = (res.bands[0].center - half) / half
+    e = e_near
+    if len(res.bands) > 1 and res.bands[1].center is not None:
+        e_mid = (res.bands[1].center - half) / half
+        e = e_near + getattr(cfg, "CENTER_EXTRAP", 1.0) * (e_near - e_mid)
+    return max(-1.0, min(1.0, e))
+
+
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
@@ -59,6 +74,9 @@ class Controller:
         self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
         self.turn_started = None    # 회전을 막 시작했으면 (방향, 이유, 띠 경계)
+        self._centering = False     # 도로 가운데 찾기 모드
+        self._deferred_turn = None  # 앞 표지판 방향을 쓰기 전에 본 다른 방향 (다음 교차로용)
+        self._pending_stale = 0     # pending_turn 표지판을 마지막으로 본 뒤 지난 프레임
         self._post_turn = False  # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
         self._post_lane = self._post_frames = 0
         self._open_run = 0          # 가까운 띠가 연속으로 양쪽 경계가 아닌 프레임
@@ -71,6 +89,16 @@ class Controller:
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
             if self._cross_frames or self._turn is not None:
                 return
+            if self.pending_turn is not None and ev.value != self.pending_turn and \
+                    self._pending_stale < getattr(cfg, "PENDING_STALE_FRAMES", 200):
+                # 앞 표지판 방향을 아직 쓰지 않았다 (그 교차로·옆길을 아직 안 지남). 뒤 표지판은 다음 교차로 것이므로
+                # 받아 두었다가 앞 방향을 쓴 뒤에 적용한다. 앞 표지판은 교차로 약 30cm 전에 화면 밖으로 나가므로
+                # "안 보이면 바로 바꾸기"는 하지 않는다
+                self._deferred_turn = ev.value
+                return
+            if ev.value != self.pending_turn:
+                self._deferred_turn = None
+            self._pending_stale = 0              # 이 방향 표지판을 방금 봤다
             self.pending_turn = ev.value
             # 같은 표지판을 다시 보면 옆길 대기 시간을 처음부터 센다. 실차는 느려서(약 5cm/s) 표지판을 처음 본 뒤
             # 옆길까지 대기 시간보다 오래 걸린 일이 있었다 (우회전 표지판을 7번 보고도 옆길을 지나침)
@@ -107,6 +135,7 @@ class Controller:
         self._cross_frames = 0
         self._turn = None
         self._post_turn = False
+        self._deferred_turn = None
 
     def sign_paused(self):
         """YOLO 를 쉬어야 하는지. 회전(TURN) 중과 출발 직후는 모터 전류가 가장 커서, YOLO 의 CPU 부하가 겹치면
@@ -120,6 +149,22 @@ class Controller:
         cfg = self.cfg
         t = cfg.BASE_THROTTLE * self.speed_scale * (1.0 - cfg.SLOW_K * abs(steering))
         return clamp(t, cfg.MIN_THROTTLE, cfg.MAX_THROTTLE)
+
+    def _center_first(self, state, error, edges):
+        """곧은 길(중간·먼 띠 양쪽 경계)에서 오차가 CENTER_START_ERROR 를 넘으면 가운데 찾기 모드를 켜고,
+        CENTER_DONE_ERROR 아래로 들어오면 끈다. 커브·교차로·회전 직후에는 쓰지 않는다 (커브는 바깥 바퀴를 밀어야 한다)."""
+        cfg = self.cfg
+        # 가장자리에 붙으면 가까운 띠에는 한쪽 경계가 화면 밖이다 (ONE_SIDE). 앞쪽(중간·먼 띠)에 양쪽 경계가
+        # 보이면 곧은 길로 본다
+        straight = (state in PID_STATES and not self._post_turn and edges and len(edges) >= 3
+                    and edges[1] == "LR" and edges[2] == "LR")
+        if not straight or not getattr(cfg, "CENTER_FIRST", True):
+            self._centering = False
+        elif self._centering:
+            self._centering = abs(error) >= getattr(cfg, "CENTER_DONE_ERROR", 0.06)
+        else:
+            self._centering = abs(error) > getattr(cfg, "CENTER_START_ERROR", 0.15)
+        return self._centering
 
     def _slow(self, throttle):
         return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
@@ -223,7 +268,7 @@ class Controller:
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 self._wait = None
 
-    def update(self, state: Optional[str], error: Optional[float], edges=None) -> Command:
+    def update(self, state: Optional[str], error: Optional[float], edges=None, near=None) -> Command:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         horn = self._horn_frames > 0
         if horn:
@@ -273,7 +318,16 @@ class Controller:
                         # 둥글어서 그 경계가 바깥으로 물러나 보이고, 그걸 따라 조향하면 10~15도 틀어진 채 교차로에
                         # 들어가 직진 중 선을 넘는다. 그동안은 핸들을 곧게 둔다
                         steering = 0.0
-                    cmd = Command(throttle=self.throttle_for(steering), steering=steering, action="PID")
+                    throttle = self.throttle_for(steering)
+                    if self._center_first(state, near if near is not None else error, edges):
+                        # 도로 가운데에서 벗어나 있으면 (가장자리로 가면 표지판이 화면 밖으로 빠진다) 앞으로 가는 것보다
+                        # 가운데로 돌아오는 것을 먼저 한다: 천천히 가면서 조향을 키운다. 가운데에 오면 원래 속도로
+                        # 내다본 오차(error)는 차가 가운데 쪽으로 비스듬히 향하기만 해도 0 이 되어 조향을 멈춘다.
+                        # 가까운 띠의 치우침(near)은 차가 실제로 도로 어디에 있는지라 그걸로 조향한다
+                        e = near if near is not None else error
+                        steering = clamp(getattr(self.cfg, "CENTER_GAIN", 1.5) * e, -1.0, 1.0)
+                        throttle = self._slow(getattr(self.cfg, "CENTER_THROTTLE", self.cfg.MIN_THROTTLE))
+                    cmd = Command(throttle=throttle, steering=steering, action="PID")
                 elif state == INTERSECTION and self._post_turn:
                     cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
                 elif state == INTERSECTION:
@@ -285,6 +339,13 @@ class Controller:
             if self._cross_frames:
                 self.pending_turn = None  # 교차로를 지나면 저장한 방향을 비운다
             self._cross_frames = 0
+        if self.pending_turn is not None:
+            self._pending_stale += 1
+            if self._deferred_turn and self._pending_stale >= getattr(self.cfg, "PENDING_STALE_FRAMES", 200):
+                self.pending_turn, self._deferred_turn, self._pending_stale = self._deferred_turn, None, 0
+        elif self._deferred_turn and not self._cross_frames:
+            # 앞 방향을 썼다 (회전을 시작했거나 교차로를 지났다) -> 받아 둔 다음 교차로 방향을 적용
+            self.pending_turn, self._deferred_turn, self._pending_stale = self._deferred_turn, None, 0
         self._last_action = cmd.action
         cmd.horn = horn
         return cmd

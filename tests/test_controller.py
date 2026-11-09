@@ -281,3 +281,51 @@ def test_brief_edge_loss_is_not_a_side_branch():
         acts += [c.update(ONE_SIDE, 0.0, ["L-", "LR", "LR"]).action for _ in range(10)]
         acts += [c.update(ONE_SIDE, 0.0, ["L-", "L-", "LR"]).action for _ in range(config.SIDE_OPEN_FRAMES - 1)]
     assert "TURN" not in acts
+
+
+def test_later_sign_waits_until_current_direction_is_used():
+    # 직진 표지판을 보고 교차로로 가는 중에 다음 교차로의 우회전 표지판이 보여도, 이번 교차로는 직진하고
+    # 우회전은 그 다음에 쓴다
+    c = make()
+    c.on_sign(ev("TURN", "STRAIGHT"))
+    run(c, 30)
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn == "STRAIGHT"
+    acts = run(c, 20, INTERSECTION, None)
+    assert "TURN" not in acts and "CROSS" in acts
+    run(c, 3)
+    assert c.pending_turn == "RIGHT"
+
+
+def test_stale_sign_gives_way_to_later_sign():
+    # 앞 방향 표지판을 오래 못 봤고 교차로도 없었으면 (잘못 본 것), 받아 둔 방향으로 바꾼다
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.on_sign(ev("TURN", "RIGHT"))
+    run(c, config.PENDING_STALE_FRAMES + 1)
+    assert c.pending_turn == "RIGHT"
+
+
+def test_nearest_turn_sign_wins_in_one_frame():
+    # 한 화면에 좌회전(가까움, 큰 박스)과 우회전(멀리, 작은 박스)이 보이면 가까운 것만 센다
+    it = SignInterpreter(config)
+    evs = []
+    for fid in range(3):
+        evs += it([{"cls": "left", "conf": 0.7, "box_h": 90, "box_y2": 300, "frame_id": fid},
+                   {"cls": "right", "conf": 0.9, "box_h": 50, "box_y2": 200, "frame_id": fid}])
+    assert [e.value for e in evs] == ["LEFT"]
+
+
+def test_center_first_slows_and_steers_by_position():
+    # 가운데 찾기 모드(켰을 때): 곧은 길에서 차가 많이 치우쳐 있으면 천천히 가며 치우침 쪽 반대로 조향한다
+    from drive.vision import ONE_SIDE
+    old = config.CENTER_FIRST
+    config.CENTER_FIRST = True
+    try:
+        c = make()
+        cmd = c.update(ONE_SIDE, 0.0, ["L-", "LR", "LR"], near=-0.4)
+        assert cmd.throttle == config.CENTER_THROTTLE and cmd.steering < 0
+        cmd = c.update(LANE, 0.0, ["LR", "LR", "LR"], near=0.0)
+        assert cmd.throttle != config.CENTER_THROTTLE or cmd.steering == 0.0
+    finally:
+        config.CENTER_FIRST = old
