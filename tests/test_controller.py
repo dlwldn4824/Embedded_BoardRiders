@@ -535,3 +535,15 @@ def test_slow_spin_ramps_up_and_does_not_exit_toward_old_road():
     assert cmds[10].throttle == config.TURN_THROTTLE
     c.update(INTERSECTION, 0.3, ["--", "LR", "LR"])   # 새 길이 정면 근처 -> 이제 회전을 마무리
     assert c._turn is None or c._turn[1] != "SPIN"
+
+
+def test_oblique_turn_sign_is_ignored():
+    # 비스듬히 본 직진 표지판을 right 로 읽음 (상자가 가늘다). 가로/세로 0.7 미만이면 버린다
+    it = SignInterpreter(config)
+    evs = []
+    for fid in range(0, 10, 2):
+        evs += it([{"cls": "right", "conf": 0.7, "box_h": 80, "box_w": 40, "box_cx": 400, "box_y2": 200, "frame_id": fid}])
+    assert evs == []
+    for fid in range(10, 20, 2):
+        evs += it([{"cls": "right", "conf": 0.7, "box_h": 80, "box_w": 76, "box_cx": 400, "box_y2": 200, "frame_id": fid}])
+    assert [e.value for e in evs] == ["RIGHT"]

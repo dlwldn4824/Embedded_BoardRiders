@@ -121,6 +121,7 @@ SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레
 SIGN_CONFIRM_WINDOW = 15
 HORN_CONFUSE_FRAMES = 30        # 경적이 보였던 자리에서 이 프레임 안에 보인 비슷한 크기의 회전 표지판은 경적으로 본다
 SIGN_EDGE_MARGIN = 4            # 회전 표지판 상자가 화면 좌우 끝에서 이 px(640 기준) 안에 닿으면 잘린 것으로 보고 버린다
+SIGN_TURN_MIN_ASPECT = 0.7      # left/right 상자의 가로/세로가 이보다 작으면(비스듬히 봄) 버린다. 학습 데이터 좌·우 표지판은 95% 가 0.73 이상
 SIGN_COOLDOWN_FRAMES = 40       # 같은 클래스 이벤트를 다시 받기까지 기다릴 프레임 수
 SIGN_IMGSZ = 320                # YOLO 입력 크기. Pi 는 weights/sign_v3_26n_320_int8.tflite (320). 640 모델이면 640 과 CAMERA_CAPTURE_SIZE (640, 480)
 # YOLO 를 돌리는 최소 간격(초). 매 프레임 돌리면 CPU 4코어가 꽉 차 전력이 모자랄 수 있다.

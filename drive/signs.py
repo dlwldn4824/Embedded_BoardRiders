@@ -97,6 +97,12 @@ class SignInterpreter:
 
         detections = [d for d in detections
                       if not (cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN" and cut(d))]
+        # 비스듬히 본 표지판은 상자가 가늘다. 직진(↑) 표지판을 옆에서 보면 ↗ 처럼 보여 right 로 읽었다 (실차: 출발점
+        # 오른쪽 앞 직진 표지판). 학습 데이터의 좌·우 표지판 상자는 95% 가 가로/세로 0.73 이상이다
+        min_asp = getattr(cfg, "SIGN_TURN_MIN_ASPECT", 0.7)
+        detections = [d for d in detections
+                      if not (d["cls"] in ("left", "right") and "box_w" in d
+                              and d["box_w"] / max(d["box_h"], 1e-6) < min_asp)]
         # 회전 표지판이 한 화면에 여럿 보이면 가장 큰 것(가장 가까운 것)만 센다. 먼 교차로의 표지판이
         # 가까운 표지판보다 먼저 이벤트가 되어 방향이 바뀌는 것을 막는다
         turn = [d for d in detections if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN"
