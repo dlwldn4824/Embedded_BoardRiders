@@ -253,6 +253,21 @@ class Controller:
         self.pending_turn = None
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
+    @staticmethod
+    def _side_is_open(seen, open_pat, n=2):
+        """회전할 쪽이 열렸는지. 가까운 n 개 띠가 모두 열림(open_pat)이면 열림.
+        차가 반대쪽 선에 붙으면 경계가 있어야 할 자리가 화면 밖이라 "모름"("L?"/"?R")이 된다. 화면 밖으로 나가는 것은
+        늘 가까운 띠부터다 (sim: 바깥 라인에 3cm 넘게 붙으면 오른쪽 옆길을 100% 놓침, 실제 띠: L?/L?/L-, L?/L-/L-).
+        그래서 가까운 쪽에서부터 이어진 "모름"만 건너뛰고, 그 다음 띠부터 n 개가 열림이면(띠가 모자라면 남은 것 모두) 열림.
+        커브는 가까운 띠가 열림인데 중간 띠가 "모름"(-R/?R/-R)이라 여기에 걸리지 않는다."""
+        unknown = "L?" if open_pat == "L-" else "?R"
+        look = list(seen[:n + 1])
+        k = 0
+        while k < len(look) and k < n and look[k] == unknown:
+            k += 1
+        rest = look[k:k + n] if k else look[:n]
+        return bool(rest) and all(e == open_pat for e in rest)
+
     def _recent_cross_now(self):
         return self._since_cross < getattr(self.cfg, "SIDE_AFTER_CROSS_FRAMES", 60)
 
@@ -303,7 +318,7 @@ class Controller:
         # opens: real_openings() 결과. 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길로 세지 않는다. 경적을 우회전으로
         # 잘못 봤을 때 오른쪽에 길이 없는데도 돌던 것을 막는다
         seen = opens if opens is not None else edges
-        self._side_open = self._side_open + 1 if all(e == open_pat for e in seen[:n]) else 0
+        self._side_open = self._side_open + 1 if self._side_is_open(seen, open_pat, n) else 0
         return self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3)
 
     def _turning(self, state, error=None, edges=None):
