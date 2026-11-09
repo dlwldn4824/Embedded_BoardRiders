@@ -127,10 +127,12 @@ FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선�
 FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
 # 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
 TURN_ENTRY_FRAMES = 18          # 실제 트랙(도로 20cm) 기준 sim 에서 맞춘 값. 예전 40 은 도로 30cm 로 추정한 트랙 기준이었다
-TURN_FRAMES = 23               # 실제 트랙 기준 sim: 진입 15~20, 회전 20~25 구간에서 좌·우·직진 모두 통과
+TURN_FRAMES = 12               # 최소 회전 프레임. 이후에는 새 길이 정면에 보일 때 끝낸다 (바닥에서 미끄러져 덜 돌아도 계속 돈다)
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
 TURN_EXIT_MAX_FRAMES = 30       # 회전 후 이만큼 지나도 차선을 못 잡으면 정지
+TURN_SPIN_MAX_FRAMES = 60       # TURN_FRAMES 뒤에도 새 길이 정면에 안 보이면 이만큼까지 계속 돈다 (3초)
+TURN_DONE_ERROR = 0.35          # 회전 끝 판정: 양쪽 경계가 보이고(LANE) 도로 중앙 오차가 이보다 작을 때
 # T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
 # 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
 # SIDE_OPEN_FRAMES 연속 사라지면 회전을 시작한다. 0 이면 끈다. 바깥 커브도 한쪽이 열려 보이므로 창을 짧게 둔다.

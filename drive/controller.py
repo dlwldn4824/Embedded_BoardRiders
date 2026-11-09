@@ -58,6 +58,7 @@ class Controller:
         self._pending_age = 0       # pending_turn 을 받은 뒤 지난 프레임
         self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
+        self._post_turn = False     # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
 
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
@@ -95,6 +96,7 @@ class Controller:
         self.pid.reset()
         self._cross_frames = 0
         self._turn = None
+        self._post_turn = False
 
     def sign_paused(self):
         """YOLO 를 쉬어야 하는지. 회전(TURN) 중과 출발 직후는 모터 전류가 가장 커서, YOLO 의 CPU 부하가 겹치면
@@ -140,9 +142,11 @@ class Controller:
         self._side_open = self._side_open + 1 if all(e == open_pat for e in edges[:n]) else 0
         return self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3)
 
-    def _turning(self, state):
-        """교차로 회전. 비전이 교차로 안에서 믿을 수 없으므로 시간 기반으로 돈다.
-        ENTRY: 교차로 안쪽까지 직진 -> SPIN: 한쪽 바퀴 위주로 회전 -> EXIT: 차선이 다시 보일 때까지 서행 직진."""
+    def _turning(self, state, error=None, edges=None):
+        """교차로 회전. ENTRY: 교차로 안쪽까지 직진 -> SPIN: 한쪽 바퀴 위주로 회전 -> EXIT: 차선이 보일 때까지 서행 직진.
+        SPIN 은 TURN_FRAMES 를 채운 뒤에도, 새 길이 양쪽 경계와 함께 화면 가운데(|오차| < TURN_DONE_ERROR)에
+        보일 때까지 계속 돈다 (최대 TURN_SPIN_MAX_FRAMES). 바닥에서 바퀴가 미끄러져 덜 돌았는데 한쪽 경계만 보고
+        PID 로 넘어가면, 원래 길을 따라가 버린다 (실차에서 좌회전을 "하다 만" 원인)."""
         cfg = self.cfg
         direction, phase, n, entry = self._turn
         self._turn[2] += 1
@@ -152,7 +156,17 @@ class Controller:
             return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
         if phase == "SPIN":
             if n + 1 >= cfg.TURN_FRAMES:
-                self._turn[1:3] = ["EXIT", 0]
+                # 차는 아직 교차로 안이라 가까운 띠는 열려 있다. 앞쪽(중간·먼) 띠에 새 길의 양쪽 경계가 보이고
+                # 도로 중앙이 화면 가운데 근처면 회전을 끝낸다 (상태값은 3프레임 확인 때문에 늦어서 띠를 직접 본다)
+                done = (error is not None and edges is not None and len(edges) >= 3
+                        and edges[1] == "LR" and edges[2] == "LR" and abs(error) < getattr(cfg, "TURN_DONE_ERROR", 0.35))
+                if done:
+                    self._turn = None
+                    self._side_closed = 0
+                    self._post_turn = True   # 교차로를 빠져나갈 때까지는 새 회전을 시작하지 않고 PID 로 간다
+                    return None   # 새 길이 정면에 보인다 -> 이번 프레임부터 PID
+                if n + 1 >= getattr(cfg, "TURN_SPIN_MAX_FRAMES", cfg.TURN_FRAMES):
+                    self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
             return Command(throttle=self._slow(cfg.TURN_THROTTLE), steering=s, action="TURN")
         # EXIT
@@ -213,9 +227,11 @@ class Controller:
             if cmd is None and self._turn is None and state in PID_STATES and self._side_branch(edges):
                 self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None))
             if cmd is None and self._turn is not None:
-                cmd = self._turning(state)
+                cmd = self._turning(state, error, edges)
+            if self._post_turn and state != INTERSECTION:
+                self._post_turn = False
             if cmd is None:
-                if state in PID_STATES and error is not None:
+                if (state in PID_STATES or self._post_turn) and error is not None:
                     if self._last_action != "PID":
                         self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
                     steering = float(self.pid(-error, dt=self.dt))

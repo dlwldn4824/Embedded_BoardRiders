@@ -115,7 +115,8 @@ def test_turn_sequence_at_intersection():
     spin = c.update(INTERSECTION, None)
     assert spin.action == "TURN" and spin.steering < 0       # SPIN: 왼쪽
     run(c, config.TURN_FRAMES - 1, INTERSECTION, None)
-    assert c.update(LANE, 0.0).action == "PID"                # 차선을 다시 잡으면 PID
+    # 최소 회전 뒤, 새 길이 정면(중간·먼 띠 양쪽 경계)에 보이면 PID 로 넘어간다
+    assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
     assert c.pending_turn is None
 
 
@@ -183,3 +184,15 @@ def test_side_branch_ignored_without_closed_road_first():
     c.on_sign(ev("TURN", "RIGHT"))
     acts = [c.update(ONE_SIDE, 0.0, ["L-", "L-", "LR"]).action for _ in range(10)]
     assert "TURN" not in acts and c.pending_turn == "RIGHT"
+
+
+def test_spin_continues_until_new_road_is_ahead():
+    # 최소 회전 시간이 지나도 새 길이 정면(중간·먼 띠 양쪽 경계, 오차 작음)에 안 보이면 계속 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    for _ in range(config.TURN_ENTRY_FRAMES + config.TURN_FRAMES + 5):
+        cmd = c.update(INTERSECTION, 0.8, ["L-", "L-", "L-"])
+    assert cmd.action == "TURN" and cmd.steering < 0
+    assert c.update(ONE_SIDE, 0.05, ["L-", "LR", "LR"]).action == "PID"
