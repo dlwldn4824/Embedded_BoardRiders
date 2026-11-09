@@ -513,6 +513,14 @@ class Controller:
                 d, self._deferred_turn, self._cross_frames = self._deferred_turn, None, 0
                 self.pending_turn = None
                 self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "막힌 T자", edges)
+            if cmd is None and self._turn is None and not self._post_turn and not self._cross_frames \
+                    and self.pending_turn in ("LEFT", "RIGHT") and state in (OFF_ROAD, LOST):
+                # 회전이 정해졌는데 앞이 막혔다 (섬·블록 정면, 실차 IMG_2399: 우회전 표지판 섬 앞에서 정지).
+                # 그쪽 옆길이 최근 열려 보였으면 멈추지 않고 그쪽으로 돈다
+                pat = "-R" if self.pending_turn == "LEFT" else "L-"
+                if self._side_ages[pat] > 0 or self._side_runs[pat] > 0:
+                    d = self.pending_turn
+                    self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "앞이 막혀 정한 방향으로", edges)
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
             if state == INTERSECTION or self._turn is not None or self._post_turn:

@@ -662,3 +662,17 @@ def test_side_opening_seen_before_sign_counts():
     c.on_sign(ev("TURN", "RIGHT"))
     m = c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"], None, ["L?", "L?", "L?"])   # 모두 "모름"이어도 지우지 않는다
     assert m.action == "TURN"
+
+
+def test_pending_turn_and_blocked_ahead_turns_instead_of_stopping():
+    # 우회전이 정해졌고 오른쪽이 열려 보였는데 앞이 섬으로 막혀 OFF_ROAD -> 멈추지 않고 우회전
+    from drive.vision import ONE_SIDE, OFF_ROAD
+    c = make()
+    c._since_cross = 10 ** 6
+    c.on_sign(ev("TURN", "RIGHT"))
+    c._side_runs["L-"] = 3          # 오른쪽 옆길이 막 열려 보였다 (회전 조건까지는 못 감)
+    m = c.update(OFF_ROAD, None, ["--", "--", "--"])
+    assert m.action == "TURN" and c._turn[0] == "RIGHT"
+    c2 = make()                      # 그쪽이 열린 적이 없으면 예전처럼 정지
+    c2.on_sign(ev("TURN", "RIGHT"))
+    assert c2.update(OFF_ROAD, None, ["--", "--", "--"]).action == "STOP"
