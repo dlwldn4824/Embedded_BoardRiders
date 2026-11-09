@@ -35,17 +35,24 @@ from drive.main import ROOT, CsvLog, MOVING_ACTIONS, Recorder, _text, draw_mask,
 from drive.motors import Car
 
 # ---------------------------------------------------------------- 트랙 (cm)
-# 실습 트랙 도면(200x200cm, 블록 60cm, 테두리 10cm, 도로 20cm)을 따랐다. 블록 4개, 길은 3x3 격자.
+# 실습 트랙 도면(200x200cm, 블록 60cm, 테두리 10cm)을 따랐다. 블록 4개, 길은 3x3 격자.
+# 도로 폭은 ROAD_OUT(바깥), ROAD_IN(블록 사이)로 따로 둔다 (아래 설명)
 # (예전에는 작년 포스터를 보고 도로 30cm, 트랙 250cm로 추정했다.)
 PX_PER_CM = 2
 BORDER = 10            # 바깥 녹색 테두리 폭
-ROAD = 20              # 도로 폭 (녹색 경계 사이, 노란 선 포함)
+# 도로 폭은 바깥과 블록 사이(안쪽)를 따로 둔다. 도면 사진으로는 바깥이 넓고 안쪽이 좁아 보이지만(안쪽 약 13~15cm),
+# 사진이 비스듬해 정확히 못 쟀다. 안쪽 15cm 로 하면 sim 의 가운데 교차로 회전이 진입 프레임과 상관없이 0/8 인데,
+# 실차는 지금 설정(진입 40)으로 잘 돈다 -> 실제로 15cm 보다 넓다. 안쪽 17.5: 진입 30 최적, 20: 진입 40 최적.
+# 줄자로 재서 넣는다 (TRACK 이 200 이 되도록 ROAD_OUT = (200 - 2*BORDER - 2*BLOCK - ROAD_IN) / 2)
+ROAD_IN = 20           # 블록 사이 안쪽 도로 폭
+ROAD_OUT = 20          # 바깥 도로 폭 (녹색 경계 사이, 노란 선 포함)
+ROAD = ROAD_OUT        # 예전 이름 (시험 스크립트 호환)
 BLOCK = 60             # 안쪽 녹색 블록 한 변
-CURVE_RADIUS = 17      # 바깥 커브 안쪽 반지름 (구석 블록의 바깥 모서리). 바깥쪽은 이 값 + ROAD
+CURVE_RADIUS = 17      # 바깥 커브 안쪽 반지름 (구석 블록의 바깥 모서리). 바깥쪽은 이 값 + ROAD_OUT
 CORNER_RADIUS = 7      # 나머지 블록 모서리 반지름
 LINE_W = 1.5           # 녹색 경계를 따라 도로 쪽에 그린 노란 선 폭
 MARGIN = 60            # 트랙 밖 바닥
-TRACK = 2 * BORDER + 3 * ROAD + 2 * BLOCK
+TRACK = 2 * BORDER + 2 * ROAD_OUT + ROAD_IN + 2 * BLOCK   # 10 + 20 + 60 + 20 + 60 + 20 + 10 = 200
 
 # 색 (BGR, run_20261028_190928에서 잰 값)
 GREEN = (75, 198, 15)
@@ -62,7 +69,7 @@ BODY_PART = (40, 200, 220)
 CAM_W, CAM_H = config.CAMERA_SIZE
 CAM_FOCAL = 320.0      # px. 수평 화각 약 90도
 CAM_PITCH_DEG = 13.4   # 아래로 기울어진 각도. 소실점이 y=164(320x240 기준 82)에 오는 값
-CAM_HEIGHT = 8.8       # cm. 도로 20cm가 가까운 띠에서 264px가 되는 값 (실제 사진의 도로 폭 픽셀)
+CAM_HEIGHT = 8.8 * ROAD_OUT / 20   # cm. 바깥 도로가 가까운 띠에서 264px가 되는 값 (실제 사진의 도로 폭 픽셀)
 CAM_FORWARD = 9.0      # 차체 중심(도는 중심)에서 카메라까지 앞쪽 거리 cm. 카메라는 차 앞쪽 끝에 있다
 CAM_MAX_DIST = 400.0   # 이보다 먼 바닥은 벽으로 칠한다
 NOISE_SIGMA = 5.0      # 픽셀 잡음 표준편차
@@ -89,14 +96,14 @@ LATENCY_FRAMES = 2     # 카메라 촬영 -> 판단까지 프레임 지연 (Pi �
 SUBSTEPS = 5
 
 # 시작 위치: 이름 -> (x cm, y cm, 방향 도). 방향 0은 오른쪽(동), 90은 아래(남), -90은 위(북).
-_MID = BORDER + ROAD + BLOCK + ROAD / 2            # 가운데 세로/가로 도로 중심선
-_BOTTOM = TRACK - BORDER - ROAD / 2                 # 아래쪽 바깥 도로 중심선
+_MID = BORDER + ROAD_OUT + BLOCK + ROAD_IN / 2     # 가운데 세로/가로 도로 중심선
+_BOTTOM = TRACK - BORDER - ROAD_OUT / 2             # 아래쪽 바깥 도로 중심선
 STARTS = {
     "outer": (50.0, _BOTTOM, 0.0),                  # 아래 바깥 도로, 동쪽으로
     "cross": (_MID, _BOTTOM - 20, -90.0),           # 가운데 세로 도로, 교차로를 향해 북쪽으로
     "corner": (140.0, _BOTTOM, 0.0),                # 오른쪽 아래 커브 앞
     "offset": (50.0, _BOTTOM + 5, -15.0),           # 테두리 쪽으로 5cm 치우치고 15도 틀어짐
-    "left_outer": (BORDER + ROAD / 2, 152.0, -90.0),  # 왼쪽 바깥 도로, 북쪽으로 (오른쪽에 가운데 가로 도로가 열린다)
+    "left_outer": (BORDER + ROAD_OUT / 2, 152.0, -90.0),  # 왼쪽 바깥 도로, 북쪽으로 (오른쪽에 가운데 가로 도로가 열린다)
 }
 
 
@@ -127,12 +134,12 @@ def build_track():
     size = _px(TRACK + MARGIN)
     shape = (size, size)
     img = np.full((size, size, 3), FLOOR, np.uint8)
-    r_out = CURVE_RADIUS + ROAD + BORDER
+    r_out = CURVE_RADIUS + ROAD_OUT + BORDER
     img[_rrect(shape, -2, -2, TRACK + 2, TRACK + 2, r_out + 2) > 0] = WHITE   # 바깥 흰 테이프
     img[_rrect(shape, 0, 0, TRACK, TRACK, r_out) > 0] = GREEN
 
-    road = _rrect(shape, BORDER, BORDER, TRACK - BORDER, TRACK - BORDER, CURVE_RADIUS + ROAD)
-    lo, hi = BORDER + ROAD, BORDER + 2 * ROAD + BLOCK
+    road = _rrect(shape, BORDER, BORDER, TRACK - BORDER, TRACK - BORDER, CURVE_RADIUS + ROAD_OUT)
+    lo, hi = BORDER + ROAD_OUT, BORDER + ROAD_OUT + BLOCK + ROAD_IN
     big, small = CURVE_RADIUS, CORNER_RADIUS
     blocks = {  # 구석 블록마다 트랙 바깥을 향한 모서리 하나만 크게 둥글다
         (lo, lo): (big, small, small, small),
@@ -151,8 +158,8 @@ def build_track():
     sw, gap, length, n = 2.5, 1.8, 8, 4
     span = n * sw + (n - 1) * gap
 
-    def crossing(a0, vertical, road_lo):
-        first = road_lo + (ROAD - span) / 2
+    def crossing(a0, vertical, road_lo, width=ROAD_OUT):
+        first = road_lo + (width - span) / 2
         for i in range(n):
             b0 = first + i * (sw + gap)
             if vertical:
@@ -161,15 +168,15 @@ def build_track():
                 p, q = (_px(a0), _px(b0)), (_px(a0 + length), _px(b0 + sw))
             cv2.rectangle(img, p, q, WHITE, -1)
 
-    c0, c1 = BORDER + ROAD + BLOCK, BORDER + 2 * ROAD + BLOCK       # 가운데 교차로 범위
+    c0, c1 = BORDER + ROAD_OUT + BLOCK, BORDER + ROAD_OUT + BLOCK + ROAD_IN   # 가운데 교차로 범위
     for a0, vertical, (bx, by) in (
             (c0 - 5 - length, True, (c0 - 8, c0 - 5 - length / 2)),
             (c1 + 5, True, (c1 + 8, c1 + 5 + length / 2)),
             (c0 - 5 - length, False, (c0 - 5 - length / 2, c1 + 8)),
             (c1 + 5, False, (c1 + 5 + length / 2, c0 - 8))):
-        crossing(a0, vertical, c0)
+        crossing(a0, vertical, c0, ROAD_IN)
         cv2.circle(img, (_px(bx), _px(by)), int(4 * PX_PER_CM), BLUE, -1, cv2.LINE_AA)
-    near, far = BORDER, TRACK - BORDER - ROAD                      # 바깥 도로 (위/왼쪽, 아래/오른쪽)
+    near, far = BORDER, TRACK - BORDER - ROAD_OUT                  # 바깥 도로 (위/왼쪽, 아래/오른쪽)
     crossing(45, False, near)                 # 위 바깥 도로, 왼쪽
     crossing(45, True, far)                   # 오른쪽 바깥 도로, 위쪽
     crossing(TRACK - 45 - length, False, far)  # 아래 바깥 도로, 오른쪽
