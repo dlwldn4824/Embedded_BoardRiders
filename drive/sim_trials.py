@@ -30,7 +30,7 @@ def _angdiff(a, b):
     return abs((a - b + 180) % 360 - 180)
 
 
-def turn_trial(turn, rng, spread, seconds=9.0):
+def turn_trial(turn, rng, spread, seconds=30.0):   # 실측 속도(약 5cm/s)로 교차로까지 약 10초
     args = sim.parse_args(["--no-gui", "--start", "cross", "--turn", turn,
                            "--right-gain", f"{1 + rng.uniform(-spread['gain'], spread['gain']):.3f}",
                            "--light", f"{1 + rng.uniform(-spread['light'], spread['light']):.2f}"])

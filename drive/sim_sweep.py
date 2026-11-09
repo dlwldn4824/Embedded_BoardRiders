@@ -16,7 +16,7 @@ from drive import sim
 KINDS = ["red_light", "left", "green_light", "right", "speed_20", "stop", "red_line"]
 
 
-def run_one(latency, miss, seed, overrides, seconds=70.0, scenario="mission"):
+def run_one(latency, miss, seed, overrides, seconds=240.0, scenario="mission"):
     saved = {k: getattr(config, k) for k in overrides}
     try:
         for k, v in overrides.items():

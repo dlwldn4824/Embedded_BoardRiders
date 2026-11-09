@@ -58,7 +58,8 @@ class Controller:
         self._pending_age = 0       # pending_turn 을 받은 뒤 지난 프레임
         self._side_open = 0         # 회전할 쪽이 연속으로 열려 보인 프레임
         self._side_closed = 0       # 그 전에 양쪽 경계가 다 보인 프레임 (옆길은 닫혀 있다가 열린다)
-        self._post_turn = False     # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
+        self._post_turn = False  # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
+        self._post_lane = self._post_frames = 0
         self._open_run = 0          # 가까운 띠가 연속으로 양쪽 경계가 아닌 프레임
 
     # ------------------------------------------------------------ 표지판 이벤트
@@ -67,9 +68,12 @@ class Controller:
         if ev.kind == "TURN":
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
-            if self._cross_frames or self._turn is not None or self._post_turn:
+            if self._cross_frames or self._turn is not None:
                 return
             self.pending_turn = ev.value
+            # 같은 표지판을 다시 보면 옆길 대기 시간을 처음부터 센다. 실차는 느려서(약 5cm/s) 표지판을 처음 본 뒤
+            # 옆길까지 대기 시간보다 오래 걸린 일이 있었다 (우회전 표지판을 7번 보고도 옆길을 지나침)
+            self._pending_age = 0
         elif ev.kind == "HORN":
             self._horn_frames = cfg.HORN_FRAMES
         elif ev.kind == "SPEED":
@@ -133,7 +137,9 @@ class Controller:
         self._pending_age += 1
         # 양쪽 경계를 본 기록은 표지판을 보기 전부터 센다. 표지판을 옆길 바로 앞에 두면, 표지판을 알아볼 때쯤
         # 이미 옆길이 열려 있다 (실차에서 표지판을 뒤로 옮겨야 돌던 원인). 다만 열린 지 오래됐으면 기록을 지운다.
-        if edges and edges[0] == "LR":
+        # 차가 회전할 쪽 반대편 경계에 붙어 가면 가까운 띠에는 회전할 쪽 경계가 화면 밖이라 늘 열려 보인다
+        # (실차: 우회전 옆길에서 왼쪽 선에 붙어 있으면 옆길을 못 알아봄). 그래서 중간 띠의 양쪽 경계도 기록으로 센다
+        if edges and (edges[0] == "LR" or (len(edges) > 1 and edges[1] == "LR")):
             self._side_closed += 1
             self._open_run = 0
         else:
@@ -174,7 +180,8 @@ class Controller:
                 if done:
                     self._turn = None
                     self._side_closed = 0
-                    self._post_turn = True   # 교차로를 빠져나갈 때까지는 새 회전을 시작하지 않고 PID 로 간다
+                    self._post_turn = True   # 새 차선에 들어설 때까지는 새 회전을 시작하지 않고 PID 로 간다
+                    self._post_lane = self._post_frames = 0
                     return None   # 새 길이 정면에 보인다 -> 이번 프레임부터 PID
                 if n + 1 >= getattr(cfg, "TURN_SPIN_MAX_FRAMES", cfg.TURN_FRAMES):
                     self._turn[1:3] = ["EXIT", 0]
@@ -235,12 +242,22 @@ class Controller:
                 if self._finish_frames < 0:
                     self.finished = True
                     cmd = Command(action="FINISH")
-            if cmd is None and self._turn is None and state in PID_STATES and self._side_branch(edges):
+            if self._post_turn:
+                # 회전을 끝낸 차는 아직 교차로 안에 있다 (실차는 느려서 오래 머문다). 그때 다음 길의 회전 표지판을
+                # 보고 바로 회전을 시작하면 교차로 안에서 엉뚱한 쪽으로 돈다. 새 차선(가까운 띠 양쪽 경계)을
+                # POST_TURN_LANE_FRAMES 연속 볼 때까지는 회전을 시작하지 않는다. 표지판 방향은 받아 둔다
+                self._post_frames += 1
+                lane = state == LANE and bool(edges) and edges[0] == "LR"
+                self._post_lane = self._post_lane + 1 if lane else 0
+                if self._post_lane >= getattr(self.cfg, "POST_TURN_LANE_FRAMES", 8) or \
+                        self._post_frames > getattr(self.cfg, "POST_TURN_MAX_FRAMES", 150):
+                    self._post_turn = False
+                    self._side_closed = 0
+            if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
+                    and self._side_branch(edges):
                 self._start_turn(self.pending_turn, getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", None))
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
-            if self._post_turn and state != INTERSECTION:
-                self._post_turn = False
             if state == INTERSECTION:
                 self._side_closed = 0   # 교차로를 나올 때 한쪽이 열려 보이는 것을 옆길로 보지 않게
             if cmd is None:
@@ -248,7 +265,15 @@ class Controller:
                     if self._last_action != "PID":
                         self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
                     steering = float(self.pid(-error, dt=self.dt))
+                    if (state == ONE_SIDE and not self._post_turn and edges and len(edges) >= 3
+                            and edges[1] == "--" and edges[2] == "--" and getattr(self.cfg, "HOLD_BEFORE_CROSS", True)):
+                        # 교차로가 바로 앞(중간·먼 띠 모두 열림)이면 가까운 띠의 한쪽 경계만 남는다. 블록 모서리가
+                        # 둥글어서 그 경계가 바깥으로 물러나 보이고, 그걸 따라 조향하면 10~15도 틀어진 채 교차로에
+                        # 들어가 직진 중 선을 넘는다. 그동안은 핸들을 곧게 둔다
+                        steering = 0.0
                     cmd = Command(throttle=self.throttle_for(steering), steering=steering, action="PID")
+                elif state == INTERSECTION and self._post_turn:
+                    cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
                 elif state == INTERSECTION:
                     cmd = self._intersection()
                 else:

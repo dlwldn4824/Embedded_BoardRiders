@@ -218,3 +218,54 @@ def test_turn_sign_ignored_while_crossing():
     run(c, 5, INTERSECTION, None)
     c.on_sign(ev("TURN", "RIGHT"))
     assert "TURN" not in run(c, 5, INTERSECTION, None)
+
+
+def test_side_branch_when_hugging_far_edge():
+    # 우회전 옆길에서 왼쪽 선에 붙어 가면 가까운 띠에는 오른쪽 경계가 늘 화면 밖이다. 중간 띠의 양쪽 경계로 기록을 센다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    for _ in range(config.SIDE_CLOSED_FRAMES):
+        assert c.update(ONE_SIDE, 0.0, ["L-", "LR", "LR"]).action == "PID"
+    acts = [c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"]).action for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN"
+
+
+def test_side_window_restarts_when_sign_seen_again():
+    # 느린 실차는 표지판을 처음 본 뒤 옆길까지 대기 시간보다 오래 걸린다. 다시 보면 대기 시간을 처음부터 센다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    for i in range(config.SIDE_TURN_WINDOW_FRAMES + 50):
+        if i % 42 == 0:
+            c.on_sign(ev("TURN", "LEFT"))
+        c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    acts = [c.update(ONE_SIDE, 0.0, ["-R", "-R", "-R"]).action for _ in range(config.SIDE_OPEN_FRAMES)]
+    assert acts[-1] == "TURN"
+
+
+def test_hold_straight_just_before_intersection():
+    # 교차로 바로 앞(중간·먼 띠 열림)에서는 가까운 띠의 한쪽 경계만 보고 조향하지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    cmd = c.update(ONE_SIDE, 0.4, ["-R", "--", "--"])
+    assert cmd.action == "PID" and cmd.steering == 0.0
+
+
+def test_no_new_turn_until_new_lane_after_turn():
+    # 좌회전을 끝낸 차가 아직 교차로 안에서 다음 길의 우회전 표지판을 봐도, 새 차선에 들어서기 전에는 돌지 않는다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c.on_sign(ev("TURN", "LEFT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"])
+    for _ in range(config.TURN_ENTRY_FRAMES + config.TURN_FRAMES + 2):
+        c.update(INTERSECTION, 0.0, ["--", "LR", "LR"])
+    assert c._turn is None and c._post_turn
+    c.on_sign(ev("TURN", "RIGHT"))
+    assert c.pending_turn == "RIGHT"
+    acts = [c.update(INTERSECTION, None, ["--", "--", "LR"]).action for _ in range(10)]
+    acts += [c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"]).action for _ in range(10)]
+    assert "TURN" not in acts
+    for _ in range(config.POST_TURN_LANE_FRAMES if hasattr(config, "POST_TURN_LANE_FRAMES") else 8):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"])
+    assert not c._post_turn and c.pending_turn == "RIGHT"

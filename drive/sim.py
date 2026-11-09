@@ -10,7 +10,7 @@
 
 가상 카메라는 run_20261028_190928에서 잰 띠별 도로 폭(264/206/143px)이 나오도록
 높이·기울기·초점거리를 맞췄고, 색도 그 사진에서 잰 값이다.
-트랙 치수와 모터 특성은 추정값이라 아래 상수로 바꿔 가며 시험한다.
+트랙은 실습 트랙 도면, 차 크기·속도·회전 속도·루프 주기는 2026-11-09 실차 영상에서 잰 값이다.
 GPIO, 카메라 없이 노트북에서 돈다. 주행 설정은 drive/config.py를 그대로 쓴다.
 """
 from __future__ import annotations
@@ -63,16 +63,29 @@ CAM_W, CAM_H = config.CAMERA_SIZE
 CAM_FOCAL = 320.0      # px. 수평 화각 약 90도
 CAM_PITCH_DEG = 13.4   # 아래로 기울어진 각도. 소실점이 y=164(320x240 기준 82)에 오는 값
 CAM_HEIGHT = 8.8       # cm. 도로 20cm가 가까운 띠에서 264px가 되는 값 (실제 사진의 도로 폭 픽셀)
-CAM_FORWARD = 5.0      # 바퀴 축 중심에서 카메라까지 앞쪽 거리 cm
+CAM_FORWARD = 9.0      # 차체 중심(도는 중심)에서 카메라까지 앞쪽 거리 cm. 카메라는 차 앞쪽 끝에 있다
 CAM_MAX_DIST = 400.0   # 이보다 먼 바닥은 벽으로 칠한다
 NOISE_SIGMA = 5.0      # 픽셀 잡음 표준편차
 
 # ---------------------------------------------------------------- 차량
-WHEEL_BASE = 14.0      # 좌우 바퀴 간격 cm
-V_MAX = 80.0           # PWM 1.0일 때 바퀴 속도 cm/s
-PWM_DEADBAND = 0.15    # 이보다 작은 PWM에서는 바퀴가 돌지 않는다 (실차 MIN_THROTTLE과 비교)
-MOTOR_TAU = 0.1        # 모터 응답 시간상수 s
-LATENCY_FRAMES = 1     # 카메라 지연. 이만큼 이전 위치에서 찍은 프레임으로 판단한다
+# 2026-11-09 실차 영상(KakaoTalk_Video_2026-11-09-22-31-52, 22-45-58)에서 잰 값.
+#   직진 BASE_THROTTLE 0.3: 약 4.7 cm/s (교차로 앞 직선 24~33초, 횡단보도·도로 폭 20cm 기준)
+#   교차로 회전(바깥 바퀴 0.32, 안쪽 정지): 90도에 약 2.5초 (약 35 도/s)
+#   차체 약 20 x 15 cm, 바퀴 4개(좌우 같은 쪽은 같이 돈다). 도로(20cm) 폭을 거의 다 차지한다.
+#   PWM 0.25 에서는 교차로 감속 중 바퀴가 멈췄고 손으로 밀면 다시 갔다 (멈춘 바퀴를 다시 돌리려면 더 큰 PWM 이 필요)
+BODY_LEN = 20.0        # 차체 길이 cm
+BODY_W = 15.0          # 차체 폭 cm
+WHEEL_TRACK = 13.0     # 좌우 바퀴 중심 간격 cm
+WHEEL_AXLE = 7.0       # 차체 중심에서 앞/뒤 바퀴까지 cm
+YAW_SLIP = 1.15        # 4륜 미끄럼 조향: 실제로 도는 양 = 바퀴 속도 차 / (WHEEL_TRACK * 이 값)
+WHEEL_BASE = WHEEL_TRACK * YAW_SLIP
+PWM_KEEP = 0.24        # 굴러가는 바퀴가 멈추는 PWM
+PWM_START = 0.27       # 멈춘 바퀴가 다시 도는 PWM (정지 마찰)
+V_SLOPE = 120.0        # PWM_KEEP 위에서 PWM 1 당 바퀴 속도 cm/s. 0.3 -> 7cm/s 바퀴, 차는 미끄럼으로 약 4.7cm/s
+DRIVE_EFF = 0.68       # 바퀴 속도 중 실제로 앞으로 가는 비율 (4륜 미끄럼, 실측 직진 속도에 맞춤)
+MOTOR_TAU = 0.15       # 모터 응답 시간상수 s
+REAL_LOOP_HZ = 17.0    # 실차 루프 실측 주기 (교차로 직진 표지판 2920 -> 3078 프레임이 영상 약 9초). 시뮬레이션 시간은 이걸로 흐른다
+LATENCY_FRAMES = 2     # 카메라 촬영 -> 판단까지 프레임 지연 (Pi 카메라 버퍼 + 처리)
 SUBSTEPS = 5
 
 # 시작 위치: 이름 -> (x cm, y cm, 방향 도). 방향 0은 오른쪽(동), 90은 아래(남), -90은 위(북).
@@ -83,6 +96,7 @@ STARTS = {
     "cross": (_MID, _BOTTOM - 20, -90.0),           # 가운데 세로 도로, 교차로를 향해 북쪽으로
     "corner": (140.0, _BOTTOM, 0.0),                # 오른쪽 아래 커브 앞
     "offset": (50.0, _BOTTOM + 5, -15.0),           # 테두리 쪽으로 5cm 치우치고 15도 틀어짐
+    "left_outer": (BORDER + ROAD / 2, 152.0, -90.0),  # 왼쪽 바깥 도로, 북쪽으로 (오른쪽에 가운데 가로 도로가 열린다)
 }
 
 
@@ -230,7 +244,7 @@ class Camera:
 
 
 class Vehicle:
-    """차동 구동 운동학. 좌우 PWM -> 바퀴 속도(데드밴드, 1차 지연) -> 위치와 방향."""
+    """4륜 미끄럼 조향(좌우 차동). 좌우 PWM -> 바퀴 속도(정지 마찰, 1차 지연) -> 위치와 방향."""
 
     def __init__(self, x, y, psi_deg, right_gain=1.0):
         self.right_gain = right_gain
@@ -239,21 +253,28 @@ class Vehicle:
     def place(self, x, y, psi_deg):
         self.x, self.y, self.psi = x, y, math.radians(psi_deg)
         self.vl = self.vr = 0.0
+        self.stuck = [True, True]          # 바퀴가 멈춰 있으면 PWM_START 를 넘어야 돈다
 
-    @staticmethod
-    def wheel_speed(pwm):
-        mag = max(0.0, (abs(pwm) - PWM_DEADBAND) / (1.0 - PWM_DEADBAND))
-        return math.copysign(V_MAX * mag, pwm)
+    def wheel_speed(self, pwm, i):
+        mag = abs(pwm)
+        if self.stuck[i]:
+            if mag < PWM_START:
+                return 0.0
+            self.stuck[i] = False
+        elif mag < PWM_KEEP:
+            self.stuck[i] = True
+            return 0.0
+        return math.copysign(V_SLOPE * (mag - PWM_KEEP), pwm)
 
     def step(self, left, right, dt):
         h = dt / SUBSTEPS
         a = 1.0 - math.exp(-h / MOTOR_TAU)
-        tl, tr = self.wheel_speed(left), self.wheel_speed(right) * self.right_gain
+        tl, tr = self.wheel_speed(left, 0), self.wheel_speed(right, 1) * self.right_gain
         moved = 0.0
         for _ in range(SUBSTEPS):
             self.vl += (tl - self.vl) * a
             self.vr += (tr - self.vr) * a
-            v = (self.vl + self.vr) / 2.0
+            v = (self.vl + self.vr) / 2.0 * DRIVE_EFF
             self.x += v * math.cos(self.psi) * h
             self.y += v * math.sin(self.psi) * h
             self.psi += (self.vl - self.vr) / WHEEL_BASE * h   # 왼쪽이 빠르면 오른쪽으로 돈다
@@ -262,7 +283,13 @@ class Vehicle:
 
     @property
     def speed(self):
-        return (self.vl + self.vr) / 2.0
+        return (self.vl + self.vr) / 2.0 * DRIVE_EFF
+
+    def wheels_xy(self):
+        """바퀴 4개가 바닥에 닿는 점 (앞왼, 앞오, 뒤왼, 뒤오)."""
+        c, s = math.cos(self.psi), math.sin(self.psi)
+        return [(self.x + f * c - r * s, self.y + f * s + r * c)
+                for f in (WHEEL_AXLE, -WHEEL_AXLE) for r in (-WHEEL_TRACK / 2, WHEEL_TRACK / 2)]
 
 
 class Sim:
@@ -279,6 +306,7 @@ class Sim:
         self.t = 0.0
         self.odo = 0.0
         self.on_road = 0
+        self.wheels_in = 0          # 바퀴 4개가 모두 도로 위였던 프레임 수
         self.steps = 0
         self.stops = 0
         self.states = Counter()
@@ -294,7 +322,7 @@ class Sim:
             from drive.sim_signs import SCENARIOS, CameraModel, SimSigns
             cam = CameraModel(CAM_W, CAM_H, CAM_FOCAL, CAM_PITCH_DEG, CAM_HEIGHT, CAM_FORWARD)
             self.signs = SimSigns(cfg, cam, SCENARIOS[args.signs], latency_s=args.sign_latency,
-                                  miss=args.sign_miss, seed=args.seed)
+                                  miss=args.sign_miss, seed=args.seed, hz=REAL_LOOP_HZ)
 
     # ------------------------------------------------------------ 시뮬레이션 한 단계
     def reset(self, name=None):
@@ -314,9 +342,18 @@ class Sim:
         h, w = self.road.shape
         return 0 <= px < w and 0 <= py < h and self.road[py, px] > 0
 
+    def wheels_on_road(self):
+        """바퀴 4개가 모두 도로(노란 선 포함) 위면 True. 하나라도 녹색 위면 선을 넘은 것."""
+        h, w = self.road.shape
+        for x, y in self.veh.wheels_xy():
+            px, py = _px(x), _px(y)
+            if not (0 <= px < w and 0 <= py < h and self.road[py, px] > 0):
+                return False
+        return True
+
     def step(self, log=None, recorder=None):
         cfg, veh = self.cfg, self.veh
-        dt = 1.0 / cfg.LOOP_HZ
+        dt = 1.0 / REAL_LOOP_HZ                    # 코드는 프레임 단위로 돌고, 차는 실측 주기만큼 움직인다
         self.frames.append(self.cam.render(veh.x, veh.y, veh.psi))
         frame = self.frames[0]                     # LATENCY_FRAMES만큼 늦은 프레임
         self.res = self.det.process(frame)
@@ -336,6 +373,7 @@ class Sim:
         self.t += dt
         self.steps += 1
         self.on_road += self.is_on_road()
+        self.wheels_in += self.wheels_on_road()
         self.states[self.res.state] += 1
         self.trail.append((veh.x, veh.y))
         del self.trail[:-3000]
@@ -347,12 +385,13 @@ class Sim:
     def summary(self):
         pct = 100.0 * self.on_road / max(1, self.steps)
         st = ", ".join(f"{k}={v}" for k, v in self.states.items())
-        out = (f"sim {self.t:5.1f}s | 주행 거리 {self.odo / 100:5.2f} m | 도로 위 {pct:5.1f}% | "
+        wpct = 100.0 * self.wheels_in / max(1, self.steps)
+        out = (f"sim {self.t:5.1f}s | 주행 거리 {self.odo / 100:5.2f} m | 도로 위 {pct:5.1f}% | 바퀴 안 넘음 {wpct:5.1f}% | "
                f"멈춘 횟수 {self.stops} | 상태 {st}")
         if self.signs is not None:
             evs = " ".join(f"{t:.1f}s:{ev.cls}" for t, ev in self.sign_log)
             out += (f"\n표지판 이벤트: {evs or '없음'}\n도착(정지선): {'성공' if self.ctrl.finished else '실패'}"
-                    f" | 검출 지연 {self.signs.latency_frames / self.cfg.LOOP_HZ:.2f}s")
+                    f" | 검출 지연 {self.signs.latency_frames / REAL_LOOP_HZ:.2f}s")
         return out
 
     # ------------------------------------------------------------ 화면
@@ -386,14 +425,19 @@ class Sim:
                         p = self._map_pt(*self.cam.pixel_to_world(veh.x, veh.y, veh.psi, xpx * sx, v))
                         cv2.circle(img, p, 3, col, -1, cv2.LINE_AA)
         c, s = math.cos(veh.psi), math.sin(veh.psi)
-        body = [(-8, -8), (12, -8), (12, 8), (-8, 8)]   # 길이 20cm, 폭 16cm
+        L, W = BODY_LEN / 2, BODY_W / 2
+        body = [(-L, -W), (L, -W), (L, W), (-L, W)]     # 실측 차체 크기
         poly = np.array([self._map_pt(veh.x + f * c - r * s, veh.y + f * s + r * c) for f, r in body], np.int32)
-        cv2.fillPoly(img, [poly], (0, 140, 255))
+        ok = self.wheels_on_road()
+        cv2.fillPoly(img, [poly], (0, 140, 255) if ok else (0, 0, 230))
+        for wx, wy in veh.wheels_xy():
+            cv2.circle(img, self._map_pt(wx, wy), 2, (20, 20, 20), -1, cv2.LINE_AA)
         cv2.line(img, self._map_pt(veh.x, veh.y), self._map_pt(veh.x + 14 * c, veh.y + 14 * s),
                  (0, 0, 0), 2, cv2.LINE_AA)
         pct = 100.0 * self.on_road / max(1, self.steps)
         _text(img, f"t {self.t:5.1f}s  v {veh.speed:5.1f} cm/s  {self.odo / 100:5.2f} m", (6, 18))
-        _text(img, f"on road {pct:5.1f}%  stops {self.stops}  start {self.start_name}", (6, 36))
+        wpct = 100.0 * self.wheels_in / max(1, self.steps)
+        _text(img, f"on road {pct:5.1f}%  wheels in {wpct:5.1f}%  stops {self.stops}", (6, 36))
         return img
 
     def view(self, paused):
@@ -422,7 +466,7 @@ def parse_args(argv=None):
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
     p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
                    help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
-    p.add_argument("--signs", choices=["mission", "left", "side_left"],
+    p.add_argument("--signs", choices=["mission", "left", "side_left", "side_right"],
                    help="가상 표지판 시나리오 (drive/sim_signs.py). mission 은 --start cross 로")
     p.add_argument("--sign-latency", type=float, default=0.0,
                    help="표지판 검출 지연 초 (Pi 의 YOLO 추론 시간). 검출 주기도 이만큼 길어진다")
@@ -466,7 +510,7 @@ def main(argv=None):
                 sim.place((x - 640) / k - MARGIN, y / k - MARGIN, math.degrees(sim.veh.psi))
 
         cv2.setMouseCallback(win, on_mouse)
-        period = 1.0 / cfg.LOOP_HZ / max(args.speed, 0.05)
+        period = 1.0 / REAL_LOOP_HZ / max(args.speed, 0.05)
         paused, step, show_mask = False, False, args.show_mask
         next_t = time.monotonic()
         print("s: 출발/일시정지  space: 비상 정지  r: 처음 위치  1~4: 시작 위치  j/l: 돌리기  클릭: 옮기기  q: 종료")

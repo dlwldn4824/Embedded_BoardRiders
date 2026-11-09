@@ -126,7 +126,7 @@ LIGHT_MAX_WAIT_FRAMES = 400     # 빨간불 최대 대기 (20초). 초록불을 
 FINISH_ARM_FRAMES = 200         # 출발 후 이 프레임 전에는 정지선을 무시 (출발 지점의 선)
 FINISH_DELAY_FRAMES = 6         # 정지선을 보고 이만큼 더 간 뒤 정지 (선이 차 앞에 올 때까지)
 # 교차로 회전: ENTRY 직진 -> SPIN 회전 -> EXIT 차선 다시 잡기. sim 으로 먼저 맞추고 실차에서 다시 맞춘다.
-TURN_ENTRY_FRAMES = 18          # 실제 트랙(도로 20cm) 기준 sim 에서 맞춘 값. 예전 40 은 도로 30cm 로 추정한 트랙 기준이었다
+TURN_ENTRY_FRAMES = 40          # 실차 속도(약 5cm/s, 17Hz)를 넣은 sim 에서 맞춘 값. 18 은 빠른 가상 차 기준이라 실차에서 너무 일찍 돌았다
 TURN_FRAMES = 12               # 최소 회전 프레임. 이후에는 새 길이 정면에 보일 때 끝낸다 (바닥에서 미끄러져 덜 돌아도 계속 돈다)
 TURN_STEERING = 1.0             # pivot: 1.0 이면 안쪽 바퀴 정지
 TURN_THROTTLE = 0.32          # 0.4 는 회전 순간 바깥 바퀴 전류가 커서 Pi 가 꺼졌다
@@ -136,12 +136,12 @@ TURN_DONE_ERROR = 0.35          # 회전 끝 판정: 양쪽 경계가 보이고(
 # T자·옆길 교차로: 한쪽 경계는 계속 보이고 회전할 쪽만 열리는 곳 (비전은 ONE_SIDE 로 본다).
 # 회전 표지판을 본 뒤 SIDE_TURN_WINDOW_FRAMES 안에, 가까운 SIDE_OPEN_BANDS 개 띠에서 회전할 쪽 경계가
 # SIDE_OPEN_FRAMES 연속 사라지면 회전을 시작한다. 0 이면 끈다. 바깥 커브도 한쪽이 열려 보이므로 창을 짧게 둔다.
-SIDE_TURN_WINDOW_FRAMES = 100   # 5초
+SIDE_TURN_WINDOW_FRAMES = 150   # 표지판을 마지막으로 본 뒤 약 9초 (실차가 느려서 100 은 옆길 전에 끝났다)
 SIDE_OPEN_BANDS = 2
 SIDE_OPEN_FRAMES = 3
 SIDE_CLOSED_FRAMES = 5          # 열리기 전에 양쪽 경계가 이만큼 보여야 한다 (교차로를 막 나올 때 오작동 방지)
 SIDE_OPEN_MAX_AGE = 40          # 표지판을 보기 전에 이미 열려 있던 옆길도 인정하는 기간 (2초). 더 오래 열려 있었으면 무시
-SIDE_TURN_ENTRY_FRAMES = 16     # 옆길이 열린 것을 본 뒤 직진할 프레임 (실제 트랙 기준 sim 6~26 모두 통과, 가운데 값)
+SIDE_TURN_ENTRY_FRAMES = 60     # 옆길이 열린 것을 본 뒤 직진할 프레임. 실차 속도 sim 에서 40~100 통과, 바퀴가 선을 가장 적게 넘은 값
 
 # ---------------------------------------------------------------- 화면 / 기록
 DISPLAY_SCALE = 2               # 오버레이 창 확대 배율
