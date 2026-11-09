@@ -704,3 +704,20 @@ def test_ambiguous_wide_open_side_waits_for_close_sign():
     c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 0, (500, 60, 563, 123)))      # 63px
     acts = [c.update(INTERSECTION, None, ["--", "--", "--"]) for _ in range(config.SIGN_NEAR_ENTRY_FRAMES + 2)]
     assert acts[-1].steering > 0
+
+
+def test_side_seek_arcs_then_line_traces():
+    # SIDE_SEEK: 옆길 회전을 정하면 직진 뒤 제자리 회전 대신 살짝 꺾으며 전진하고, 회전할 쪽 초록과 새 길이 보이면 PID
+    old = config.SIDE_SEEK
+    config.SIDE_SEEK = True
+    try:
+        c = make()
+        c._start_turn("RIGHT", 3, "옆길")
+        c._seek = True
+        run(c, 3, INTERSECTION, None)
+        arc = c.update(INTERSECTION, None, ["--", "--", "--"])
+        assert arc.action == "TURN" and 0 < arc.steering < 1.0 and arc.throttle == config.SEEK_THROTTLE
+        run(c, config.SEEK_MIN_FRAMES, INTERSECTION, None)
+        assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
+    finally:
+        config.SIDE_SEEK = old

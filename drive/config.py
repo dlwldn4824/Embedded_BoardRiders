@@ -190,6 +190,15 @@ SIDE_MIN_ENTRY_FRAMES = 5       # 표지판보다 옆길이 먼저 열려 있었
 SIDE_LATE_MAX_FRAMES = 40       # 표지판 전부터 열린 시간이 이보다 길면 옆길이 아니라 넓게 열린 곳이라 직진을 줄이지 않는다
 SIDE_AMBIG_ENTRY_FRAMES = 120   # 경계로 옆길 위치를 모를 때(가까운·중간 띠 모두 "모름") 표지판이 커지지 않으면 이만큼 직진 뒤 돈다
 SIDE_REAL_MIN_FRAMES = 3        # 열림 동안 진짜 열림을 이보다 적게 봤으면 "경계로 모름"으로 본다
+# 옆길 회전 방식 (실차 비교용, 기본 끔). True 면: 회전할 쪽 초록이 없어진 뒤 카메라가 보는 거리(SEEK_STRAIGHT_FRAMES,
+# 약 18cm)만큼 직진 -> 제자리 회전 대신 살짝 꺾으며 전진(SEEK_STEER, SEEK_THROTTLE) -> 회전할 쪽 초록과 새 길이 보이면 라인 트레이싱.
+# 카메라는 차 중심보다 약 20~24cm 앞 바닥을 보므로, 초록이 없어지는 순간에는 옆길이 아직 앞에 있다
+SIDE_SEEK = False
+SEEK_STRAIGHT_FRAMES = 60
+SEEK_STEER = 0.3                # 안쪽 바퀴가 멈추지 않을 만큼만 (SEEK_THROTTLE 0.36 x 0.7 = 0.25)
+SEEK_THROTTLE = 0.36
+SEEK_MIN_FRAMES = 10
+SEEK_MAX_FRAMES = 200
 SIDE_ALL_UNKNOWN_FRAMES = 25    # 모든 띠에서 그쪽 경계가 "모름"인 채 이만큼 이어지면 열린 길로 센다 (바깥 라인에 붙어 오른쪽 옆길을 지나침)
 SIDE_ALL_UNKNOWN_MAX_ERR = 0.25  # 위 조건은 오차가 이보다 작을 때(곧게 갈 때)만 센다. 커브(실차 오차 0.4~0.8)는 제외
 # 옆길 회전을 경계로 판단이 안 되는 상태(가까운·중간 띠 모두 "모름")에서 정하고 직진하는 중, 같은 방향 표지판이 이만큼(px, 640x480)

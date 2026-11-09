@@ -121,6 +121,7 @@ class Controller:
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
+        self._seek = False          # 지금 옆길 회전이 "살짝 꺾으며 초록 찾기" 방식인지
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -278,6 +279,7 @@ class Controller:
 
     def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
         self._done_run = 0
+        self._seek = False
         self._turn_ambiguous = False
         self._stuck = self._kick = 0
         self._last_view = None
@@ -419,8 +421,21 @@ class Controller:
                 if self._gg_seen >= getattr(cfg, "TEND_EXTRA_FRAMES", 4):
                     entry = n + 1
             if n + 1 >= entry:
-                self._turn[1:3] = ["SPIN", 0]
+                self._turn[1:3] = ["ARC" if self._seek else "SPIN", 0]
             return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
+        if phase == "ARC":
+            # 옆으로 살짝 꺾으며 전진한다. 회전할 쪽 초록 경계가 가까운 띠에 다시 보이고 앞쪽(중간 띠)에 새 길의 양쪽
+            # 경계가 보이면 라인 트레이싱(PID)으로 넘어간다
+            side = "R" if direction == "RIGHT" else "L"
+            found = (n + 1 >= getattr(cfg, "SEEK_MIN_FRAMES", 10) and edges and len(edges) >= 2
+                     and side in edges[0] and edges[0] != "lr" and edges[1] == "LR" and state in PID_STATES)
+            if found or n + 1 >= getattr(cfg, "SEEK_MAX_FRAMES", 200):
+                self._turn = None
+                self._post_turn, self._post_dir = True, direction
+                self._post_lane = self._post_frames = 0
+                return None
+            st = getattr(cfg, "SEEK_STEER", 0.3) * (1 if direction == "RIGHT" else -1)
+            return Command(throttle=self._slow(getattr(cfg, "SEEK_THROTTLE", 0.36)), steering=st, action="TURN")
         if phase == "SPIN":
             if n + 1 >= cfg.TURN_FRAMES:
                 # 차는 아직 교차로 안이라 가까운 띠는 열려 있다. 앞쪽(중간·먼) 띠에 새 길의 양쪽 경계가 보이고
@@ -545,8 +560,13 @@ class Controller:
                     entry = getattr(self.cfg, "SIDE_AMBIG_ENTRY_FRAMES", 120)
                 why = "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else "") + \
                     (f" (표지판 전부터 열림 {late}프레임)" if late else "") + (" (경계 모름: 표지판 크기로)" if amb else "")
+                if getattr(self.cfg, "SIDE_SEEK", False) and not amb:
+                    # 살짝 꺾으며 초록 찾기 방식: 초록이 없어진 뒤 카메라가 보는 거리만큼 직진 (열림 확인에 쓴 프레임은 뺀다)
+                    entry = max(1, getattr(self.cfg, "SEEK_STRAIGHT_FRAMES", 60) - getattr(self.cfg, "SIDE_OPEN_FRAMES", 10))
+                    why += " (살짝 꺾으며 초록 찾기)"
                 self._start_turn(self.pending_turn, entry, why, edges)
                 self._turn_ambiguous = amb
+                self._seek = getattr(self.cfg, "SIDE_SEEK", False) and not amb
             if cmd is None and self._turn is None and self._cross_frames and self._deferred_turn in ("LEFT", "RIGHT") \
                     and (state in (OFF_ROAD, LOST) or (edges and "GG" in edges)):
                 # 직진하다 앞이 막혔다 (T자 끝) -> 받아 둔 방향으로 바로 돈다
