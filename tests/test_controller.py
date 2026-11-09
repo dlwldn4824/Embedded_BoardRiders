@@ -567,14 +567,14 @@ def test_turn_sign_seen_while_crossing_used_when_blocked_ahead():
     # 받아 둔 방향으로, 앞이 막히면(먼 띠 초록 GG 또는 LOST) 바로 돈다
     from drive.vision import LOST
     c = make()
-    run(c, 5, INTERSECTION, None)                     # 표지판 없이 교차로 직진 중
+    run(c, config.CROSS_LATE_SIGN_FRAMES + 5, INTERSECTION, None)   # 표지판 없이 교차로 직진 중 (들어선 지 오래됨)
     c.on_sign(ev("TURN", "RIGHT"))
     assert c.pending_turn is None
     assert "TURN" not in run(c, 5, INTERSECTION, None)
     m = c.update(INTERSECTION, None, ["--", "--", "GG"])
     assert m.action == "TURN" and c._turn[0] == "RIGHT"
     c2 = make()
-    run(c2, 5, INTERSECTION, None)
+    run(c2, config.CROSS_LATE_SIGN_FRAMES + 5, INTERSECTION, None)
     c2.on_sign(ev("TURN", "LEFT"))
     assert c2.update(LOST, None, ["--", "--", "--"]).action == "TURN" and c2._turn[0] == "LEFT"
 
@@ -641,3 +641,24 @@ def test_t_end_exit_turns_after_reaching_the_border():
     c2.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.5)
     acts = [c2.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.5) for _ in range(config.TURN_ENTRY_FRAMES + 2)]
     assert acts[-1].steering > 0                                     # 십자 교차로: 정해진 진입 뒤 회전
+
+
+def test_late_turn_sign_right_after_entering_intersection():
+    # 정한 방향 없이 교차로에 막 들어섰는데 회전 표지판이 늦게 확정됨 -> 그 방향으로 돈다 (남은 진입만큼 직진 후)
+    c = make()
+    run(c, 8, INTERSECTION, None)
+    c.on_sign(ev("TURN", "RIGHT"))
+    acts = [c.update(INTERSECTION, None, ["--", "--", "--"]) for _ in range(config.TURN_ENTRY_FRAMES)]
+    assert acts[0].action == "TURN" and acts[-1].steering > 0
+
+
+def test_side_opening_seen_before_sign_counts():
+    # 옆길이 표지판보다 먼저 열려 있었으면, 표지판이 와도 처음부터 다시 세지 않고 바로 돈다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    for _ in range(config.SIDE_OPEN_FRAMES + 6):
+        c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"], None, ["L?", "L-", "L-"])
+    c.on_sign(ev("TURN", "RIGHT"))
+    m = c.update(ONE_SIDE, 0.0, ["L-", "L-", "L-"], None, ["L?", "L?", "L?"])   # 모두 "모름"이어도 지우지 않는다
+    assert m.action == "TURN"

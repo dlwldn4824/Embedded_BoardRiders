@@ -112,6 +112,10 @@ class Controller:
         self._since_cross = 0       # 마지막 교차로·회전 뒤 지난 프레임
         self._straight_open = 0     # 직진 예약 중 옆길이 열려 보인 프레임
         self._open_skip = 0         # 옆길을 알아볼 때 건너뛴 가까운 띠 수
+        self._side_runs = {"-R": 0, "L-": 0}   # 그쪽이 열려 보인 프레임 수 (표지판과 상관없이)
+        self._side_ages = {"-R": 0, "L-": 0}   # 열리기 시작한 뒤 지난 프레임
+        self._side_late = 0         # 표지판보다 먼저 열려 있던 프레임 (그만큼 덜 직진)
+        self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
         self._done_run = 0          # 회전 끝 조건이 연속으로 맞은 프레임
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
@@ -128,6 +132,15 @@ class Controller:
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
             if self._turn is not None:
+                return
+            if self._cross_frames and self.pending_turn is None and ev.value in ("LEFT", "RIGHT") \
+                    and self._cross_frames <= getattr(cfg, "CROSS_LATE_SIGN_FRAMES", 20):
+                # 정한 방향 없이 교차로에 막 들어섰는데 회전 표지판이 늦게 확정됐다 (표지판이 옆길 바로 앞에 있음).
+                # 직진 표지판을 보고 들어간 경우는 아래처럼 직진을 지킨다
+                self.pending_turn = ev.value
+                self._late_entry = max(getattr(cfg, "SIDE_MIN_ENTRY_FRAMES", 5),
+                                       cfg.TURN_ENTRY_FRAMES - self._cross_frames)
+                self._cross_frames = 0
                 return
             if self._cross_frames:
                 # 교차로를 직진하는 중에는 방향을 바꾸지 않는다 (가운데 교차로에서 건너편 길의 우회전 표지판을 보고
@@ -297,6 +310,11 @@ class Controller:
             self._open_run += 1
             if self._open_run > getattr(cfg, "SIDE_OPEN_MAX_AGE", 40):
                 self._side_closed = 0
+        # 양쪽 옆길이 열려 보이는 것은 표지판이 오기 전부터 센다. 표지판이 옆길 바로 앞에 있으면 확정될 때쯤 차는 이미
+        # 옆길 옆이라 먼 띠는 그 너머 블록(LR)을 본다 (sim·실차: 위 바깥 도로에서 오른쪽 옆길을 지나침)
+        seen_all = opens if opens is not None else edges
+        if edges:
+            self._track_sides(seen_all, getattr(cfg, "SIDE_OPEN_BANDS", 2))
         if self.pending_turn == "STRAIGHT" and edges and not self._recent_cross_now():
             # 직진 표지판을 보고 옆길(진짜 열린 길)을 지나친다 -> 직진을 쓴 것. 예전에는 십자 교차로에서만 지워져서,
             # 뒤에 본 회전 표지판이 다음 교차로용으로 오래 보류되어 우회전 옆길을 지나쳤다
@@ -324,9 +342,34 @@ class Controller:
             return False
         # opens: real_openings() 결과. 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길로 세지 않는다. 경적을 우회전으로
         # 잘못 봤을 때 오른쪽에 길이 없는데도 돌던 것을 막는다
-        seen = opens if opens is not None else edges
-        self._side_open = self._side_open + 1 if self._side_is_open(seen, open_pat, n) else 0
-        return self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3)
+        self._side_open = self._side_runs[open_pat]
+        if self._side_open >= getattr(cfg, "SIDE_OPEN_FRAMES", 3):
+            # 표지판보다 먼저 열려 있었으면(age 가 길면) 옆길에 그만큼 가깝다 -> 직진을 줄인다
+            self._side_late = max(0, self._side_ages[open_pat] - getattr(cfg, "SIDE_OPEN_FRAMES", 3))
+            return True
+        return False
+
+    def _track_sides(self, seen, n):
+        """양쪽(-R 왼쪽 열림, L- 오른쪽 열림)이 열려 보인 횟수와 열리기 시작한 뒤 지난 프레임을 센다.
+        가까운 띠들이 모두 "모름"인 프레임은 지우지 않고 넘어간다 (바깥 라인에 붙으면 자주 나온다)."""
+        for pat in ("-R", "L-"):
+            unknown = "L?" if pat == "L-" else "?R"
+            look = list(seen[:n + 1])
+            if any(e in ("LR", "lr") for e in look[:n]):
+                state = False
+            elif self._side_is_open(seen, pat, n):
+                state = True
+            elif look[:n] and all(e == unknown for e in look[:n]):
+                state = None
+            else:
+                state = False
+            if state is False:
+                self._side_runs[pat] = self._side_ages[pat] = 0
+                continue
+            if state:
+                self._side_runs[pat] += 1
+            if self._side_runs[pat]:
+                self._side_ages[pat] += 1
 
     def _turning(self, state, error=None, edges=None):
         """교차로 회전. ENTRY: 교차로 안쪽까지 직진 -> SPIN: 한쪽 바퀴 위주로 회전 -> EXIT: 차선이 보일 때까지 서행 직진.
@@ -394,8 +437,10 @@ class Controller:
             self.pending_turn, self._deferred_turn = self._deferred_turn, None
         if self.pending_turn in ("LEFT", "RIGHT"):
             tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
-            self._start_turn(self.pending_turn, getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else None,
-                             "막힌 T자 끝" if tend else "교차로", edges)
+            late, self._late_entry = self._late_entry, None
+            entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
+            why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
+            self._start_turn(self.pending_turn, entry, why, edges)
             self._tend, self._gg_seen = tend, 0
             return self._turning(INTERSECTION, edges=edges)
         # 직진 표지판 또는 표지판 없음: 감속 직진, INTERSECTION_MAX_FRAMES를 넘으면 정지
@@ -454,11 +499,14 @@ class Controller:
                     self._side_closed = 0
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._side_branch(edges, opens):
-                # 먼 띠로 옆길을 알아봤으면(가까운 띠 "모름") 옆길이 그만큼 멀다 -> 더 직진한 뒤 돈다 (실차: 너무 일찍 돎)
+                # 먼 띠로 옆길을 알아봤으면(가까운 띠 "모름") 옆길이 그만큼 멀다 -> 더 직진 (SIDE_SKIP_EXTRA_FRAMES).
+                # 표지판보다 옆길이 먼저 열려 있었으면 그만큼 옆길에 가깝다 -> 덜 직진
                 entry = getattr(self.cfg, "SIDE_TURN_ENTRY_FRAMES", 53) + \
-                    self._open_skip * getattr(self.cfg, "SIDE_SKIP_EXTRA_FRAMES", 0)
-                self._start_turn(self.pending_turn, entry, "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else ""),
-                                 edges)
+                    self._open_skip * getattr(self.cfg, "SIDE_SKIP_EXTRA_FRAMES", 0) - self._side_late
+                entry = max(getattr(self.cfg, "SIDE_MIN_ENTRY_FRAMES", 5), entry)
+                why = "옆길" + (f" (먼 띠 {self._open_skip}칸)" if self._open_skip else "") + \
+                    (f" (표지판 전부터 열림 {self._side_late}프레임)" if self._side_late else "")
+                self._start_turn(self.pending_turn, entry, why, edges)
             if cmd is None and self._turn is None and self._cross_frames and self._deferred_turn in ("LEFT", "RIGHT") \
                     and (state in (OFF_ROAD, LOST) or (edges and "GG" in edges)):
                 # 직진하다 앞이 막혔다 (T자 끝) -> 받아 둔 방향으로 바로 돈다
