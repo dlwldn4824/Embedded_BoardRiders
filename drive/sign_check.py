@@ -23,7 +23,7 @@ import cv2
 
 from drive import config
 from drive.main import ROOT, OfflineSource, imwrite
-from drive.signs import SignInterpreter, YoloSignDetector
+from drive.signs import SignInterpreter, YoloSignDetector, covers_center
 
 LIMIT_MS = 300   # docs/sim-signs.md: 검출 한 번이 이보다 길면 미션이 실패하기 시작한다
 
@@ -40,6 +40,8 @@ def why_not(d, cfg):
         return f"멀다 (박스 <{rule['min_h']}px)"
     if d["box_y2"] < rule["min_y2"]:
         return f"아직 위쪽 (y2 <{rule['min_y2']})"
+    if rule.get("center") and not covers_center(d, cfg.CAMERA_SIZE[0]):
+        return "화면 가운데를 안 덮음 (옆길 것)"
     return "OK"
 
 
@@ -82,7 +84,7 @@ def main(argv=None):
         source, flip = CameraSource(cfg), True
     print(f"표지판 점검: {args.signs} → {out}  (Ctrl+C 로 끝)")
 
-    ms, max_h, n_det, events = [], defaultdict(float), defaultdict(int), []
+    ms, max_h, max_y2, n_det, events = [], defaultdict(float), defaultdict(float), defaultdict(int), []
     fid, last_cam = 0, None
     t_start = time.perf_counter()
     try:
@@ -106,6 +108,7 @@ def main(argv=None):
                 d["frame_id"] = fid
                 n_det[d["cls"]] += 1
                 max_h[d["cls"]] = max(max_h[d["cls"]], d["box_h"])
+                max_y2[d["cls"]] = max(max_y2[d["cls"]], d["box_y2"])
                 print(f"#{fid:05d} {d['cls']:12s} conf {d['conf']:.2f}  박스 h {d['box_h']:5.0f}px  "
                       f"y2 {d['box_y2']:5.0f}  → {why_not(d, cfg)}")
             for ev in interp(dets):
@@ -128,10 +131,10 @@ def main(argv=None):
         med, p90 = statistics.median(s), s[max(0, int(len(s) * 0.9) - 1)]
         verdict = "OK" if p90 <= LIMIT_MS else ("아슬아슬" if med <= LIMIT_MS else "느림 → 320 모델 검토")
         lines.append(f"검출 시간: 중앙값 {med:.0f}ms, p90 {p90:.0f}ms → {verdict} (기준 {LIMIT_MS}ms)")
-    lines.append("클래스별: 검출 프레임 수 / 최대 박스 높이 (반응 기준 SIGN_MIN_BOX_H "
-                 f"{cfg.SIGN_MIN_BOX_H}px)")
+    lines.append("클래스별: 검출 프레임 수 / 최대 박스 높이 / 최대 y2 (반응 기준 SIGN_MIN_BOX_H "
+                 f"{cfg.SIGN_MIN_BOX_H}px, 횡단보도는 y2 {cfg.SIGN_CLASS_RULES.get('crosswalk', {}).get('min_y2', 0)})")
     for c in sorted(n_det):
-        lines.append(f"  {c:12s} {n_det[c]:5d}  {max_h[c]:5.0f}px")
+        lines.append(f"  {c:12s} {n_det[c]:5d}  {max_h[c]:5.0f}px  y2 {max_y2[c]:4.0f}")
     lines.append(f"이벤트 {len(events)}개: " + ", ".join(f"#{f}:{e.cls}" for f, e in events))
     text = "\n".join(lines)
     print("\n" + text)

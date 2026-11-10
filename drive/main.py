@@ -441,6 +441,8 @@ class Runner:
             extra.append(f"turn {ctrl._turn[0]} {ctrl._turn[1]}")
         if ctrl._wait:
             extra.append(f"wait {ctrl._wait[0]} {ctrl._wait[1] / hz:.1f}s left")
+        elif ctrl._red_on:
+            extra.append("red light seen: stop at the crosswalk")
         if ctrl.speed_scale != 1.0:
             extra.append(f"slow: {ctrl.speed_scale * 100:.0f}% of normal speed, {ctrl._speed_frames / hz:.1f}s left")
         if self.offline and self.playback_paused:

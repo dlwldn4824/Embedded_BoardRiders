@@ -59,19 +59,126 @@ def test_stop_sign_works_again_after_ignore_window():
     assert run(c, 1) == ["STOP"]
 
 
-def test_red_light_holds_until_green():
+def test_red_light_far_away_does_not_stop():
+    # 실차: 신호등이 커서 멀리서도 빨간불이 확정돼 횡단보도 한참 앞에서 섰다. 빨간불만으로는 서지 않고 기억만 한다
     c = make()
     c.on_sign(ev("LIGHT", "RED"))
+    assert set(run(c, 50)) == {"PID"}
+    assert c._red_on
+
+
+def test_red_light_stops_at_crosswalk_until_green():
+    c = make()
+    c.on_sign(ev("LIGHT", "RED"))
+    run(c, 30)
+    c.on_sign(ev("CROSSWALK"))          # 횡단보도가 차 바로 앞
     assert set(run(c, 50)) == {"RED"}
     c.on_sign(ev("LIGHT", "GREEN"))
     assert run(c, 1) == ["PID"]
 
 
-def test_red_light_times_out():
+def test_red_light_off_resumes_without_green():
+    # 초록불을 못 잡아도 빨간불이 꺼지면(OFF) 출발한다
     c = make()
     c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    assert run(c, 5) == ["RED"] * 5
+    c.on_sign(ev("LIGHT", "OFF"))
+    assert run(c, 1) == ["PID"]
+
+
+def test_red_light_waits_while_still_red_then_times_out():
+    # 빨간불이 계속 보이면(쿨다운마다 RED) 최대 대기를 넘겨도 기다린다. 더 못 보면 최대 대기 뒤 출발하고,
+    # 그 빨간불은 놓는다 (교차로 입구에서 또 서지 않는다)
+    c = make()
+    c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    acts = []
+    for i in range(config.LIGHT_MAX_WAIT_FRAMES * 2):
+        if i % config.SIGN_COOLDOWN_FRAMES == 0:
+            c.on_sign(ev("LIGHT", "RED"))
+        acts.append(c.update(LANE, 0.0).action)
+    assert set(acts) == {"RED"}
     acts = run(c, config.LIGHT_MAX_WAIT_FRAMES + 2)
-    assert acts[-1] == "PID"
+    assert acts[-1] == "PID" and not c._red_on
+    assert c.update(INTERSECTION, None).action == "CROSS"
+
+
+def test_crosswalk_without_red_does_not_stop():
+    c = make()
+    c.on_sign(ev("CROSSWALK"))
+    assert run(c, 5) == ["PID"] * 5
+    c2 = make()
+    c2.on_sign(ev("LIGHT", "RED"))
+    c2.on_sign(ev("LIGHT", "GREEN"))    # 다가가는 동안 초록불로 바뀜
+    c2.on_sign(ev("CROSSWALK"))
+    assert run(c2, 5) == ["PID"] * 5
+
+
+def test_red_confirmed_just_after_crosswalk_stops():
+    # 횡단보도 앞에 온 뒤에야 빨간불이 확정돼도 선다. 횡단보도를 본 지 오래면 서지 않는다 (이미 지나감)
+    c = make()
+    c.on_sign(ev("CROSSWALK"))
+    run(c, config.RED_CROSSWALK_HOLD_FRAMES - 5)
+    c.on_sign(ev("LIGHT", "RED"))
+    assert run(c, 1) == ["RED"]
+    c2 = make()
+    c2.on_sign(ev("CROSSWALK"))
+    run(c2, config.RED_CROSSWALK_HOLD_FRAMES + 5)
+    c2.on_sign(ev("LIGHT", "RED"))
+    assert run(c2, 1) == ["PID"]
+
+
+def test_red_without_crosswalk_stops_at_intersection_entry():
+    # 횡단보도를 못 잡았으면 교차로 입구(INTERSECTION)에서 선다. 빨간불이 꺼지면 교차로를 지난다
+    c = make()
+    c.on_sign(ev("LIGHT", "RED"))
+    assert run(c, 10) == ["PID"] * 10
+    assert run(c, 5, INTERSECTION, None) == ["RED"] * 5
+    c.on_sign(ev("LIGHT", "OFF"))
+    assert run(c, 1, INTERSECTION, None) == ["CROSS"]
+
+
+def test_red_stop_during_turn_entry_keeps_detector_running():
+    # 옆길 회전을 정하고 직진(ENTRY)하다 교차로 입구에서 빨간불로 서면, 회전 중이라도 YOLO 를 쉬지 않는다 (신호 바뀜을 봐야 한다).
+    # 빨간불이 꺼지면 남은 직진부터 이어 간다
+    c = make()
+    c.on_sign(ev("LIGHT", "RED"))
+    c._start_turn("LEFT", 30, "옆길")
+    run(c, 5, INTERSECTION, None)
+    assert c._wait and c._wait[0] == "RED" and c._turn[1] == "ENTRY"
+    assert not c.sign_paused()
+    c.on_sign(ev("LIGHT", "OFF"))
+    m = c.update(INTERSECTION, None)
+    assert m.action == "TURN" and m.steering == 0.0 and c.sign_paused()
+
+
+def test_open_bands_before_intersection_state_keep_going_straight():
+    # 교차로 입구: 상태 확정(3프레임) 전에 띠가 모두 열린 프레임(오차 없음)이 섞여 와도 서지 않고 곧게 간다.
+    # (sim: 섰다 출발한 차가 이런 프레임마다 서서 모터 세기가 0부터 다시 올라가, 정지 바퀴를 끝내 못 돌렸다)
+    from drive.vision import ONE_SIDE
+    c = make()
+    acts = []
+    for i in range(12):
+        if i % 3 == 2:
+            acts.append(c.update(ONE_SIDE, None, ["--", "--", "--"]))
+        else:
+            acts.append(c.update(ONE_SIDE, -0.13, ["L-", "--", "--"]))
+    assert all(m.action in ("PID", "CROSS") and m.throttle > 0 for m in acts)
+    assert all(m.steering == 0.0 for m in acts if m.action == "CROSS")
+    # 앞이 막힌 화면(먼 띠가 초록 위)이나 도로를 잃은 상태는 예전처럼 선다
+    assert make().update(ONE_SIDE, None, ["--", "--", "GG"]).action == "STOP"
+    assert make().update(LOST, None, ["--", "--", "--"]).action == "STOP"
+
+
+def test_red_ignored_once_inside_intersection():
+    # 교차로를 지나는 중에 빨간불로 바뀌거나 건너편 횡단보도가 보여도 서지 않고 빠져나간다
+    c = make()
+    run(c, 5, INTERSECTION, None)
+    c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    assert "RED" not in run(c, 10, INTERSECTION, None)
+    assert not c._red_on
 
 
 def test_green_without_red_does_nothing():
@@ -157,6 +264,59 @@ def test_interpreter_red_line_uses_position():
     assert it([det("red_line", 1, h=8, y2=200)]) == [] and it([det("red_line", 2, h=8, y2=200)]) == []
     it([det("red_line", 3, h=8, y2=450)])
     assert [e.kind for e in it([det("red_line", 4, h=8, y2=450)])] == ["FINISH"]
+
+
+def test_interpreter_crosswalk_only_when_close_and_ahead():
+    # 횡단보도는 차 바로 앞(상자 아래 끝 y2 >= min_y2, 화면 가운데를 덮음)일 때만 이벤트가 된다
+    it = SignInterpreter(config)
+    y2 = config.SIGN_CLASS_RULES["crosswalk"]["min_y2"]
+    cw = lambda f, **k: {"cls": "crosswalk", "conf": 0.9, "frame_id": f, **k}   # noqa: E731
+    evs = []
+    for f in range(0, 8, 2):
+        evs += it([cw(f, box_h=30, box_w=200, box_cx=320, box_y2=250),             # 멀다
+                   cw(f, box_h=100, box_w=150, box_cx=100, box_y2=y2 + 20)])       # 가깝지만 옆길 (가운데를 안 덮음)
+    assert evs == []
+    for f in range(8, 12, 2):
+        evs += it([cw(f, box_h=115, box_w=400, box_cx=405, box_y2=398)])           # 실차 사진: 횡단보도 바로 앞
+    assert [e.kind for e in evs] == ["CROSSWALK"]
+
+
+def test_interpreter_red_off_after_missing_runs():
+    # 빨간불 이벤트를 낸 뒤 LIGHT_OFF_RUNS 번 연속 검출에서 빨간불이 안 보이면 OFF 를 한 번 낸다
+    it = SignInterpreter(config)
+    red = lambda f, conf=0.9: {"cls": "red_light", "conf": conf, "box_h": 100, "box_w": 40,   # noqa: E731
+                               "box_cx": 200, "box_y2": 200, "frame_id": f}
+    assert all(it([]) == [] for _ in range(config.LIGHT_OFF_RUNS + 1))     # 빨간불을 본 적 없으면 OFF 도 없다
+    evs = it([red(1)]) + it([red(3)])
+    assert [(e.kind, e.value) for e in evs] == [("LIGHT", "RED")]
+    evs = []
+    for _ in range(config.LIGHT_OFF_RUNS - 1):
+        evs += it([])
+    evs += it([red(9, conf=0.3)])             # 신뢰도가 낮아도 빨간불이 보이면 아직 켜진 것
+    for _ in range(config.LIGHT_OFF_RUNS - 1):
+        evs += it([])
+    assert evs == []
+    evs += it([])
+    assert [(e.kind, e.value) for e in evs] == [("LIGHT", "OFF")]
+    assert all(it([]) == [] for _ in range(5))                              # 한 번만
+    evs = it([red(20)]) + it([red(22)])       # 다시 켜지면 쿨다운 없이 바로 알린다
+    assert [(e.kind, e.value) for e in evs] == [("LIGHT", "RED")]
+
+
+def test_interpreter_red_leaving_frame_edge_is_not_off():
+    # 정지 위치에서 신호등이 화면 오른쪽 끝으로 빠지면 꺼진 건지 모른다 -> OFF 를 내지 않는다 (초록불이나 최대 대기로 출발)
+    it = SignInterpreter(config)
+    red = lambda f, cx: {"cls": "red_light", "conf": 0.9, "box_h": 120, "box_w": 60,   # noqa: E731
+                         "box_cx": cx, "box_y2": 200, "frame_id": f}
+    it([red(1, 400)])
+    assert [(e.kind, e.value) for e in it([red(3, 400)])] == [("LIGHT", "RED")]
+    it([red(5, 600)])                          # 오른쪽 끝 가까이(x2 = 630) 보이다가
+    assert all(it([]) == [] for _ in range(config.LIGHT_OFF_RUNS * 3))      # 사라짐
+    it([red(30, 400)])                         # 다시 화면 안에서 보였다가 사라지면 꺼진 것
+    evs = []
+    for _ in range(config.LIGHT_OFF_RUNS):
+        evs += it([])
+    assert [(e.kind, e.value) for e in evs] == [("LIGHT", "OFF")]
 
 
 def test_interpreter_cooldown():

@@ -473,8 +473,8 @@ def parse_args(argv=None):
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
     p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
                    help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
-    p.add_argument("--signs", choices=["mission", "left", "side_left", "side_right"],
-                   help="가상 표지판 시나리오 (drive/sim_signs.py). mission 은 --start cross 로")
+    p.add_argument("--signs", choices=["mission", "left", "red", "side_left", "side_right"],
+                   help="가상 표지판 시나리오 (drive/sim_signs.py). mission, red 는 --start cross 로")
     p.add_argument("--sign-latency", type=float, default=0.0,
                    help="표지판 검출 지연 초 (Pi 의 YOLO 추론 시간). 검출 주기도 이만큼 길어진다")
     p.add_argument("--sign-miss", type=float, default=0.0, help="프레임마다 표지판을 놓칠 확률")
