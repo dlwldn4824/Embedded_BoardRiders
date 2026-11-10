@@ -18,6 +18,7 @@
 
 ```bash
 python -m drive.sim --start cross --signs mission                       # 창 모드. 지도에 가상 표지판이 보인다
+python -m drive.sim --start cross --signs red --speed 4                 # 빨간불 + 횡단보도만: 횡단보도 앞에서 서는지 본다
 python -m drive.sim --no-gui --start cross --signs mission --sign-latency 0.3
 python -m drive.sim --no-gui --start cross --signs mission --set SIGN_MIN_BOX_H=45   # config 값 바꿔 보기
 python -m drive.sim_sweep                                               # 지연 0~1초 x 박스 기준 40/45 표
@@ -45,7 +46,9 @@ python -m drive.sim_sweep                                               # 지연
   - 가림은 계산하지 않는다.
 
 `mission` 시나리오 (`--start cross`):
-1. 가운데 교차로 앞: 신호등(6초까지 빨간불, 그다음 초록불)과 좌회전 표지판
+1. 가운데 교차로: 신호등(6초까지 빨간불, 그다음 초록불), 횡단보도, 좌회전 표지판
+   - 신호등은 실습 트랙 사진처럼 교차로 건너편 왼쪽 모서리에 있고, 몸통 높이는 15cm 로 둔다 (출발점에서 이미 60px 를 넘는다).
+   - 횡단보도는 바닥 표시(`floor`, 폭 15.4cm, 길이 8cm)로, sim 트랙 그림의 횡단보도와 같은 자리다.
 2. 서쪽 T자: 우회전 표지판
 3. 서쪽 바깥 도로: 서행 표지판
 4. 위쪽 도로: 정지 표지판
@@ -190,3 +193,22 @@ python -m drive.sim_sweep                                               # 지연
 - 새 시나리오: `python -m drive.sim --start left_outer --signs side_right` (왼쪽 바깥 도로에서 옆길로 우회전, 표지판은 옆길 바로 앞).
 - 창 모드는 실제 시간(17 Hz)으로 흐른다. 실차처럼 느리니 `--speed 4` 로 빨리 보면 된다.
 - 모터 곡선(멈춤 PWM, 속도 기울기)은 영상 두 개에서 잰 근사값이다. 실차 화면의 `FPS` 값과 직선 1 m 를 가는 시간을 재 주면 더 맞출 수 있다.
+
+## 11. 빨간불: 횡단보도 앞에서 서기 (2026-11-10)
+
+실차에서 멀리서 빨간불을 보고 횡단보도 한참 앞에서 섰다. 이제는 빨간불을 기억만 하고, 차 바로 앞 횡단보도가 보일 때 선다.
+자세한 규칙은 `docs/real-car-2026-11-10.md` 11장에 있다.
+
+- 가상 횡단보도(`floor`, 폭 15.4cm, 길이 8cm)를 넣고, 신호등을 교차로 건너편 왼쪽 모서리(몸통 15cm)로 옮겼다.
+- `--signs red` (빨간불 12초 + 횡단보도) 결과. 거리는 범퍼에서 횡단보도 앞 끝까지다.
+
+| 검출 지연 | 빨간불 확정 | 선 시각 | 선 자리 | 출발 |
+|---|---|---|---|---|
+| 0 | 0.1s | 3.65s | 12.3cm 앞 | 12.2s (초록불) |
+| 0.2s | 0.4s | 3.94s | 11.0cm 앞 | 12.6s |
+| 0.35s | 0.7s | 4.29s | 9.6cm 앞 | 13.1s |
+| 0.5s | 0.9s | 4.76s | 7.5cm 앞 | 13.2s |
+
+- `python -m drive.sim_sweep --box-h 45` 미션은 지연 0~0.5초 모두 도착했다 (83~90초). 빨간불 대기는 출발점 5.2초에서 횡단보도 앞 2.0~2.5초로 줄었다.
+- `python -m drive.sim_trials mission` 같은 조건 50번 (시드 3 20번 + 시드 11 30번): 새 코드 49/50, 원래 코드 50/50. 실패 1번은 5장의 이웃 길 표지판(서행)이 교차로 바로 앞에서 잡힌 경우다.
+- `python -m drive.sim_trials turns -n 20`: 새 코드, 원래 코드 모두 56/60.

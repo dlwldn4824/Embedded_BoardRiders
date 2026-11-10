@@ -19,7 +19,8 @@
 | left / right | 다음 교차로에서 회전: ENTRY 직진 → SPIN 한쪽 바퀴 회전 → EXIT 차선 다시 잡기 | `TURN_ENTRY_FRAMES=40`, `TURN_FRAMES=20` |
 | straight / 표지판 없음 | 교차로 감속 직진 (기존과 같음, 최대 프레임만 20 → 80) | `INTERSECTION_MAX_FRAMES` |
 | stop | 3초 정지 후 출발 | `STOP_WAIT_FRAMES` |
-| red_light | 초록불을 볼 때까지 정지 (최대 20초) | `LIGHT_MAX_WAIT_FRAMES` |
+| red_light | 멀리서 보면 기억만 하고 계속 간다. 차 바로 앞 횡단보도(crosswalk)가 같이 보이면 그 앞에서 서서, 초록불을 보거나 빨간불이 꺼질 때까지 기다린다 (빨간불을 마지막으로 본 뒤 최대 20초). 횡단보도를 못 잡으면 교차로 입구에서 선다 | `SIGN_CLASS_RULES["crosswalk"]`, `LIGHT_OFF_RUNS`, `LIGHT_MAX_WAIT_FRAMES` |
+| crosswalk | 상자 아래 끝이 화면 아래쪽(y2 ≥ 350)이고 화면 가운데를 덮을 때만 이벤트. 빨간불일 때만 정지에 쓴다 | `SIGN_CLASS_RULES["crosswalk"]` |
 | speed_20 | 6초 동안 속도 0.6배 (기존은 끝까지 유지) | `SPEED_FRAMES` |
 | red_line | 출발 10초 뒤부터 인식, 조금 더 가서 정지 (도착) | `FINISH_ARM_FRAMES`, `FINISH_DELAY_FRAMES` |
 | horn | 기존과 같음 | |

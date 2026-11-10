@@ -92,6 +92,8 @@ class Controller:
         self._run_frames = 0        # 출발 후 프레임 수 (출발 지점 정지선 무시용)
         self._speed_frames = 0
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
+        self._red_on = False        # 빨간불을 봤고 아직 안 꺼졌다. 멀리서 봐도 바로 서지 않고 횡단보도 앞에서 선다
+        self._crosswalk_age = None  # 차 바로 앞 횡단보도(CROSSWALK 이벤트)를 본 뒤 지난 프레임
         self._turn = None           # 교차로 회전 진행: [방향, 단계, 단계 프레임]
         self._finish_frames = None  # 정지선을 본 뒤 남은 주행 프레임
         self._stop_ignore = 0       # 정지 표지판 대기를 마친 뒤 같은 표지판을 무시할 남은 프레임
@@ -201,13 +203,38 @@ class Controller:
             if not (self._wait and self._wait[0] == "STOP") and self._stop_ignore == 0:
                 self._wait = ["STOP", cfg.STOP_WAIT_FRAMES]
         elif ev.kind == "LIGHT":
+            # 신호등은 커서 멀리서도 빨간불이 확정된다. 보자마자 서면 횡단보도 한참 앞에서 섰다 (실차).
+            # 그래서 빨간불은 기억만 해 두고, 차 바로 앞 횡단보도(CROSSWALK)가 같이 보일 때 선다
             if ev.value == "RED":
-                self._wait = ["RED", cfg.LIGHT_MAX_WAIT_FRAMES]
-            elif self._wait and self._wait[0] == "RED":
-                self._wait = None   # 초록불: 바로 출발
+                if not self._before_cross():
+                    return      # 이미 교차로 안: 신호가 바뀌어도 서지 않고 빠져나간다
+                self._red_on = True
+                if self._wait and self._wait[0] == "RED":
+                    self._wait[1] = cfg.LIGHT_MAX_WAIT_FRAMES   # 아직 빨간불: 최대 대기를 처음부터 센다
+                elif self._crosswalk_age is not None and \
+                        self._crosswalk_age <= getattr(cfg, "RED_CROSSWALK_HOLD_FRAMES", 30):
+                    self._stop_for_red("횡단보도 앞에서 빨간불 확정")
+            else:   # GREEN, 또는 OFF (빨간불이 LIGHT_OFF_RUNS 번 연속 안 보임 = 꺼짐)
+                self._red_on = False
+                if self._wait and self._wait[0] == "RED":
+                    self._wait = None   # 바로 출발
+                    self.notice = "초록불 -> 출발" if ev.value == "GREEN" else "빨간불 꺼짐 -> 출발"
+        elif ev.kind == "CROSSWALK":
+            self._crosswalk_age = 0
+            if self._red_on and self._before_cross() and not (self._wait and self._wait[0] == "RED"):
+                self._stop_for_red("횡단보도 앞")
         elif ev.kind == "FINISH":
             if self._run_frames >= cfg.FINISH_ARM_FRAMES and self._finish_frames is None:
                 self._finish_frames = cfg.FINISH_DELAY_FRAMES
+
+    def _before_cross(self):
+        """아직 교차로에 들어서지 않았는지 (빨간불에 설 수 있는 곳). 교차로를 직진·회전 중이거나 회전을 막 끝냈으면
+        이미 지나온 것이다. 회전을 정하고 직진(ENTRY)하는 중은 아직 앞으로 본다 (옆길 회전은 옆길 전부터 ENTRY 다)."""
+        return not self._cross_frames and not self._post_turn and (self._turn is None or self._turn[1] == "ENTRY")
+
+    def _stop_for_red(self, why):
+        self._wait = ["RED", self.cfg.LIGHT_MAX_WAIT_FRAMES]
+        self.notice = f"빨간불: {why} -> 정지 (꺼질 때까지)"
 
     # ------------------------------------------------------------ 주행 시작/정지
     def set_running(self, on):
@@ -230,6 +257,8 @@ class Controller:
         배터리 전압이 떨어져 Pi 가 꺼진다. 이 구간에는 표지판도 필요 없다 (회전 방향은 이미 정해져 있다)."""
         if not getattr(self.cfg, "SIGN_PAUSE_IN_TURN", True):
             return False
+        if self._wait:
+            return False    # 서 있으면 모터 전류가 없다. 빨간불에 서 있는 동안(회전 진입 중이라도) 신호가 바뀌는 것을 봐야 한다
         return self._turn is not None or (self.running and self._run_frames < getattr(self.cfg, "SIGN_PAUSE_START_FRAMES", 0))
 
     # ------------------------------------------------------------ 매 프레임
@@ -564,6 +593,8 @@ class Controller:
             if self._wait[1] <= 0:
                 if self._wait[0] == "STOP":
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
+                elif self._wait[0] == "RED":
+                    self._red_on = False    # 빨간불을 오래 다시 못 봤다: 이 빨간불은 놓고 간다 (교차로 입구에서 또 서지 않게)
                 self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None,
@@ -571,12 +602,19 @@ class Controller:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
         self._ahead = ahead
         self._last_error = error
+        if self._crosswalk_age is not None:
+            self._crosswalk_age += 1
         # 커브 판단은 설 자리를 반영한 오차(PID 가 맞추려는 값)로 한다. 곧은 길에서 한쪽에 서 있으면 원래 오차는 남지만 이 값은 0 근처다
         self._track_curve(state, None if error is None else error + self.lane_offset())
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1
         cmd = None
+        if self.running and not self.finished and not self._wait and self._red_on and state == INTERSECTION \
+                and self._before_cross():
+            # 빨간불인데 횡단보도를 못 잡은 채 교차로 입구까지 왔다 (실차 카메라는 횡단보도를 놓칠 수 있다).
+            # 횡단보도 바로 뒤라 조금 늦지만, 신호를 어기고 교차로에 들어가지 않게 여기서 선다
+            self._stop_for_red("횡단보도는 못 봤지만 교차로 입구")
         if not self.running:
             cmd = Command(action="PAUSE")
         elif self.finished:
@@ -692,6 +730,11 @@ class Controller:
                     # 직전 조향을 유지한다. LOST_HOLD_FRAMES 가 지나도 도로가 안 보이면 정지
                     self._lost_hold += 1
                     cmd = Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
+                elif state in PID_STATES and edges and all(e == "--" for e in edges):
+                    # 상태는 아직 차선인데 이번 프레임 띠가 모두 열렸다 = 교차로에 막 들어서는 중 (상태 확정은 3프레임 늦다).
+                    # 여기서 한 프레임이라도 서면 모터 세기가 0부터 다시 올라간다. 그 사이 이런 프레임이 또 오면 정지 바퀴를 돌릴 세기에
+                    # 끝내 못 닿아 교차로 입구에 영영 서 있었다 (sim: 빨간불에 섰다 출발한 뒤). 교차로 감속 직진처럼 곧게 간다
+                    cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
                 else:
                     # OFF_ROAD, LOST, 상태 없음, 또는 이번 프레임에 도로 중앙이 없음 -> 즉시 정지
                     cmd = Command(action="STOP")

@@ -54,10 +54,17 @@ class YoloSignDetector(SignDetector):
         return out
 
 
+def covers_center(d, ref_w):
+    """상자가 화면 가운데 세로선을 덮는지 (차 바로 앞, 지금 가는 길 위에 있는지). 상자 정보가 없으면 True."""
+    if "box_cx" not in d or "box_w" not in d:
+        return True
+    return d["box_cx"] - d["box_w"] / 2 <= ref_w / 2 <= d["box_cx"] + d["box_w"] / 2
+
+
 @dataclass
 class SignEvent:
     # "TURN" (value: LEFT/STRAIGHT/RIGHT), "HORN", "SPEED" (value: 속도 배율), "STOP",
-    # "LIGHT" (value: RED/GREEN), "FINISH"
+    # "LIGHT" (value: RED/GREEN/OFF, OFF = 빨간불이 꺼짐), "CROSSWALK" (차 바로 앞 횡단보도), "FINISH"
     kind: str
     value: object
     cls: str
@@ -74,6 +81,10 @@ class SignInterpreter:
         self._last_fired = {}
         self._hits = defaultdict(deque)   # 클래스별 조건을 통과한 frame_id
         self._last_horn = None            # 마지막 경적 검출 (우회전으로 헷갈린 것 거르기)
+        self._red_fired = False           # 빨간불 이벤트를 냈고 아직 꺼짐(OFF)을 알리지 않았다
+        self._red_missing = 0             # 빨간불이 하나도 안 보인 연속 검출 횟수
+        self._red_cut = False             # 마지막 빨간불 상자가 화면 끝에 닿았다 (사라지면 꺼진 건지 화면 밖으로 나간 건지 모름)
+        self._last_fid = None
 
     def _rule(self, cls):
         rule = {"min_conf": self.cfg.SIGN_MIN_CONF, "min_h": self.cfg.SIGN_MIN_BOX_H, "min_y2": 0}
@@ -86,6 +97,11 @@ class SignInterpreter:
         window = getattr(cfg, "SIGN_CONFIRM_WINDOW", 0)
         events = []
         seen = set()
+        # 빨간불이 꺼졌는지 보려고, 거르기 전에 이번 검출에 빨간불이 있었는지 본다 (크기·신뢰도 상관없이)
+        reds = [d for d in detections if d["cls"] == "red_light"]
+        for d in detections:
+            if d.get("frame_id") is not None:
+                self._last_fid = d["frame_id"]
         # 화면 왼쪽·오른쪽 끝에 걸려 잘린 회전 표지판은 방향을 잘못 읽는다 (실차: 왼쪽 끝에 반쯤 걸린 경적을
         # right 로 봄). 상자가 끝에서 SIGN_EDGE_MARGIN px 안에 닿으면 버린다. 기준 폭은 검출기 기준 화면(640)
         ref_w = cfg.CAMERA_SIZE[0]
@@ -147,6 +163,8 @@ class SignInterpreter:
             r = self._rule(d["cls"])
             if d["conf"] < r["min_conf"] or d["box_h"] < r["min_h"] or d.get("box_y2", 0) < r["min_y2"]:
                 continue
+            if r.get("center") and not covers_center(d, ref_w):
+                continue
             seen.add(d["cls"])
             fid = d["frame_id"]
             hits = self._hits[d["cls"]]
@@ -165,6 +183,26 @@ class SignInterpreter:
                 box = (d["box_cx"] - d["box_w"] / 2, d.get("box_y2", 0) - d["box_h"], d["box_cx"] + d["box_w"] / 2,
                        d.get("box_y2", 0))
             events.append(SignEvent(spec[0], spec[1], d["cls"], d["conf"], fid, box))
+        # 빨간불이 꺼짐: 빨간불 이벤트를 낸 뒤 LIGHT_OFF_RUNS 번 연속 검출에서 빨간불이 하나도 안 보이면 OFF 를 한 번 낸다.
+        # 초록불을 못 잡아도(늦은 검출) 빨간불이 꺼진 것으로 출발할 수 있다. 검출 횟수로 세므로 YOLO 가 쉬는 동안은 안 센다.
+        # 마지막 빨간불 상자가 화면 끝(좌·우·위) 가까이 있었으면 꺼진 게 아니라 화면 밖으로 나간 것일 수 있어 세지 않는다
+        # (sim: 횡단보도 옆 신호등이 정지 위치에서 화면 오른쪽 밖으로 빠져 OFF 로 보고 빨간불에 출발했다)
+        if reds:
+            self._red_missing = 0
+            b = max(reds, key=lambda d: d["box_h"])
+            em = getattr(cfg, "LIGHT_EDGE_MARGIN", 64)
+            self._red_cut = ("box_cx" in b and "box_w" in b and (b["box_cx"] - b["box_w"] / 2 <= em
+                                                                  or b["box_cx"] + b["box_w"] / 2 >= ref_w - em)) \
+                or ("box_y2" in b and b["box_y2"] - b["box_h"] <= em)
+        elif not self._red_cut:
+            self._red_missing += 1
+        for ev in events:
+            if ev.kind == "LIGHT":
+                self._red_fired = ev.value == "RED"
+        if self._red_fired and self._red_missing >= getattr(cfg, "LIGHT_OFF_RUNS", 4):
+            self._red_fired = False
+            self._last_fired.pop("red_light", None)   # 빨간불이 다시 켜지면 쿨다운 없이 바로 알린다
+            events.append(SignEvent("LIGHT", "OFF", "red_light_off", 0.0, self._last_fid))
         return events
 
 
