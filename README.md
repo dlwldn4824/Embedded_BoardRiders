@@ -352,6 +352,8 @@ tests/     컨트롤러 · 표지판 필터 테스트
 - 주행 코드에 더한 것: [docs/drive-changes.md](docs/drive-changes.md)
 - 시뮬레이터 가상 표지판 · 검출 지연 · 무작위 반복 시험: [docs/sim-signs.md](docs/sim-signs.md) (`python -m drive.sim_trials`)
 - 실차 주행 시험 기록 (11-10: 문제 · 원인 · 조치 · 검증): [docs/real-car-2026-11-10.md](docs/real-car-2026-11-10.md)
+- 녹화한 주행 분석 (초록 경계가 언제 사라지는지, 띠별 도로 폭): `python -m drive.analyze_run <녹화 폴더> --csv <로그> --turn RIGHT --out <출력>` ([drive/analyze_run.py](drive/analyze_run.py))
+- 신호등 아래쪽만 보일 때 꺼짐/켜짐, 빨간불 정지 위치: [docs/sign-v4-lights.md](docs/sign-v4-lights.md)
 - 데이터 점검 결과: [docs/data-report.md](docs/data-report.md)
 - 학습 방향 설계: [docs/training-plan.md](docs/training-plan.md)
 - 차선 데이터 수집 방법: [docs/collection-guide.md](docs/collection-guide.md)
