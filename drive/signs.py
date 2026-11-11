@@ -61,6 +61,14 @@ def covers_center(d, ref_w):
     return d["box_cx"] - d["box_w"] / 2 <= ref_w / 2 <= d["box_cx"] + d["box_w"] / 2
 
 
+def _box(d):
+    """검출 dict -> (x1, y1, x2, y2), 640x480 기준. 상자 정보가 없으면 None."""
+    if "box_cx" not in d or "box_w" not in d:
+        return None
+    return (d["box_cx"] - d["box_w"] / 2, d.get("box_y2", 0) - d["box_h"], d["box_cx"] + d["box_w"] / 2,
+            d.get("box_y2", 0))
+
+
 @dataclass
 class SignEvent:
     # "TURN" (value: LEFT/STRAIGHT/RIGHT), "HORN", "SPEED" (value: 속도 배율), "STOP",
@@ -156,6 +164,15 @@ class SignInterpreter:
                     continue
                 keep.append(d)
             detections = keep
+        # 회전 표지판이 이번 검출에 보였는지를 쿨다운·연속 검출 없이 매번 알린다 (TURN_SEEN).
+        # 넓은 바깥 도로에서는 경계로 옆길 입구를 못 볼 때가 있어, 표지판이 가까이 왔다가 화면 밖으로 나간 시점을
+        # 회전 시점으로 쓴다 (실차 run_20261111_202356: 경계가 내내 L-/L-/-R 로 안 바뀌어 옆길을 지나침)
+        for d in detections:
+            spec = cfg.SIGN_CLASS_EVENTS.get(d["cls"])
+            if spec and spec[0] == "TURN" and spec[1] in ("LEFT", "RIGHT") \
+                    and d["conf"] >= self._rule(d["cls"])["min_conf"] and d.get("frame_id") is not None:
+                events.append(SignEvent("TURN_SEEN", spec[1], d["cls"], d["conf"], d["frame_id"], _box(d)))
+                break
         for d in sorted(detections, key=lambda d: -d["conf"]):
             spec = cfg.SIGN_CLASS_EVENTS.get(d["cls"])
             if spec is None or d["cls"] in seen:
@@ -178,11 +195,7 @@ class SignInterpreter:
                 continue
             self._last_fired[d["cls"]] = fid
             hits.clear()
-            box = None
-            if "box_cx" in d and "box_w" in d:
-                box = (d["box_cx"] - d["box_w"] / 2, d.get("box_y2", 0) - d["box_h"], d["box_cx"] + d["box_w"] / 2,
-                       d.get("box_y2", 0))
-            events.append(SignEvent(spec[0], spec[1], d["cls"], d["conf"], fid, box))
+            events.append(SignEvent(spec[0], spec[1], d["cls"], d["conf"], fid, _box(d)))
         # 빨간불이 꺼짐: 빨간불 이벤트를 낸 뒤 LIGHT_OFF_RUNS 번 연속 검출에서 빨간불이 하나도 안 보이면 OFF 를 한 번 낸다.
         # 초록불을 못 잡아도(늦은 검출) 빨간불이 꺼진 것으로 출발할 수 있다. 검출 횟수로 세므로 YOLO 가 쉬는 동안은 안 센다.
         # 마지막 빨간불 상자가 화면 끝(좌·우·위) 가까이 있었으면 꺼진 게 아니라 화면 밖으로 나간 것일 수 있어 세지 않는다

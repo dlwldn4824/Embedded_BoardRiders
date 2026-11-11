@@ -256,3 +256,16 @@ KEY_QUIT = (ord("q"),)
 KEY_TOGGLE_MASK = (ord("m"),)
 KEY_PLAYBACK_PAUSE = (ord("p"),)  # offline: 재생 멈춤/재개
 KEY_PLAYBACK_STEP = (ord("n"),)   # offline: 멈춘 상태에서 한 프레임 진행
+
+# --record 저장 (무거우면 주행이 밀리므로 줄여서 저장)
+RECORD_EVERY = 3       # 3 프레임마다 1장
+RECORD_SCALE = 0.5     # 640x480 -> 320x240
+RECORD_QUALITY = 70    # JPG 품질
+
+# 넓은 바깥 도로 옆길 마지막 수단: 회전 표지판이 SIGN_GONE_MIN_H px 이상으로 보였다가 SIGN_GONE_FRAMES 동안 안 보이면
+# SIGN_GONE_ENTRY 프레임 직진 뒤 돈다. 가까운 띠가 한참 양쪽 경계를 못 본 넓은 길에서만, 커브 직후는 제외. 0 이면 끈다
+SIGN_GONE_ENTRY = 20
+SIGN_GONE_MIN_H = 80
+SIGN_GONE_FRAMES = 20
+SIGN_GONE_MAX_AGE = 60
+SIGN_GONE_EDGE = 100     # 마지막 상자가 회전할 쪽 화면 끝에서 이 px(640 기준) 안에 있어야 한다

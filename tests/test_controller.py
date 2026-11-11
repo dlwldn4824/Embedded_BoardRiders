@@ -502,7 +502,7 @@ def test_nearest_turn_sign_wins_in_one_frame():
     for fid in range(3):
         evs += it([{"cls": "left", "conf": 0.7, "box_h": 90, "box_y2": 300, "frame_id": fid},
                    {"cls": "right", "conf": 0.9, "box_h": 50, "box_y2": 200, "frame_id": fid}])
-    assert [e.value for e in evs] == ["LEFT"]
+    assert [e.value for e in evs if e.kind != "TURN_SEEN"] == ["LEFT"]
 
 
 def test_center_first_slows_and_steers_by_position():
@@ -659,7 +659,7 @@ def test_turn_sign_elsewhere_after_horn_is_kept():
     evs = []
     for fid in range(2, 10, 2):
         evs += it([{"cls": "right", "conf": 0.8, "box_h": 60, "box_w": 55, "box_cx": 150, "box_y2": 220, "frame_id": fid}])
-    assert [e.value for e in evs] == ["RIGHT"]
+    assert [e.value for e in evs if e.kind != "TURN_SEEN"] == ["RIGHT"]
 
 
 def test_turn_sign_cut_at_frame_edge_is_ignored():
@@ -671,7 +671,7 @@ def test_turn_sign_cut_at_frame_edge_is_ignored():
     assert evs == []
     for fid in range(10, 20, 2):   # 화면 안으로 다 들어오면 받는다
         evs += it([{"cls": "right", "conf": 0.7, "box_h": 90, "box_w": 70, "box_cx": 120, "box_y2": 200, "frame_id": fid}])
-    assert [e.value for e in evs] == ["RIGHT"]
+    assert [e.value for e in evs if e.kind != "TURN_SEEN"] == ["RIGHT"]
 
 
 def test_invalid_both_edge_band_does_not_end_spin():
@@ -722,7 +722,7 @@ def test_oblique_turn_sign_is_ignored():
     assert evs == []
     for fid in range(10, 20, 2):
         evs += it([{"cls": "right", "conf": 0.7, "box_h": 80, "box_w": 76, "box_cx": 400, "box_y2": 200, "frame_id": fid}])
-    assert [e.value for e in evs] == ["RIGHT"]
+    assert [e.value for e in evs if e.kind != "TURN_SEEN"] == ["RIGHT"]
 
 
 def test_lane_offset_follows_pending_turn():
@@ -788,7 +788,7 @@ def test_same_sign_straight_and_right_picks_higher_confidence():
     for fid in range(0, 6, 2):
         evs += it([{"cls": "straight", "conf": 0.85, "box_h": 70, "box_w": 66, "box_cx": 400, "box_y2": 200, "frame_id": fid},
                    {"cls": "right", "conf": 0.55, "box_h": 74, "box_w": 70, "box_cx": 402, "box_y2": 202, "frame_id": fid}])
-    assert [e.value for e in evs] == ["STRAIGHT"]
+    assert [e.value for e in evs if e.kind != "TURN_SEEN"] == ["STRAIGHT"]
 
 
 def test_vision_blocked_t_junction_is_intersection():
@@ -961,3 +961,39 @@ def test_keep_crossing_when_lost_but_road_ahead():
         c.update(INTERSECTION, None, edges=["--", "--", "--"])
     acts = [c.update(LOST, None, edges=["--", "--", "LR"]).action for _ in range(10)]
     assert "STOP" not in acts and acts[-1] == "CROSS"
+
+
+def test_wide_road_turn_when_sign_leaves_frame():
+    """넓은 바깥 도로: 경계가 내내 L-/L-/-R 로 안 바뀌어도, 우회전 표지판이 크게 보였다가 오른쪽 끝으로 빠져
+    SIGN_GONE_FRAMES 동안 안 보이면 돈다 (실차 run_20261111_202356 옆길 지나침)."""
+    from drive.signs import SignEvent
+    c = Controller(config)
+    c.set_running(True)
+    edges = ["L-", "L-", "-R"]
+    opens = ["L?", "L?", "-R"]   # 넓은 길: 블록 쪽 경계는 화면 밖이라 "모름"
+    for _ in range(60):
+        c.update("ONE_SIDE", -0.17, edges, opens=opens)
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (500, 100, 560, 160)))
+    c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (500, 100, 600, 200)))
+    started = None
+    for i in range(config.SIGN_GONE_FRAMES + 5):
+        c.update("ONE_SIDE", -0.17, edges, opens=opens)
+        if c.turn_started and started is None:
+            started = i
+    assert started is not None and started >= config.SIGN_GONE_FRAMES - 1
+
+
+def test_sign_leaving_opposite_side_does_not_turn():
+    """반대쪽(왼쪽) 끝으로 빠진 우회전 표지판은 옆길 위치와 상관없다: 표지판 사라짐으로 돌지 않는다."""
+    from drive.signs import SignEvent
+    c = Controller(config)
+    c.set_running(True)
+    edges = ["L-", "L-", "-R"]
+    opens = ["L?", "L?", "-R"]   # 넓은 길: 블록 쪽 경계는 화면 밖이라 "모름"
+    for _ in range(60):
+        c.update("ONE_SIDE", -0.17, edges, opens=opens)
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (40, 100, 100, 160)))
+    c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (10, 100, 110, 200)))
+    for _ in range(config.SIGN_GONE_FRAMES + 5):
+        c.update("ONE_SIDE", -0.17, edges, opens=opens)
+        assert not (c.turn_started and "표지판" in c.turn_started[1])

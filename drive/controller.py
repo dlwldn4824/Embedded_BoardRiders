@@ -126,6 +126,11 @@ class Controller:
         self._unknown_runs = {"-R": 0, "L-": 0}   # 모든 띠에서 그쪽 경계가 안 보인 연속 프레임
         self._last_error = None
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
+        self._seen_dir = None       # TURN_SEEN: 마지막으로 보인 회전 표지판 방향
+        self._seen_age = 999        # 그 표지판을 마지막으로 본 뒤 지난 프레임
+        self._seen_max_h = 0.0      # 그 표지판이 보인 동안 가장 큰 상자 높이
+        self._seen_box = None       # 그 표지판의 마지막 상자
+        self._seen_straight = False # 마지막으로 봤을 때 곧게 가고 있었다
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
         self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
@@ -152,6 +157,18 @@ class Controller:
     # ------------------------------------------------------------ 표지판 이벤트
     def on_sign(self, ev):
         cfg = self.cfg
+        if ev.kind == "TURN_SEEN":
+            if self._turn is None:
+                h = (ev.box[3] - ev.box[1]) if ev.box else 0.0
+                if ev.value != self._seen_dir:
+                    self._seen_dir, self._seen_max_h = ev.value, 0.0
+                self._seen_age = 0
+                self._seen_max_h = max(self._seen_max_h, h)
+                self._seen_box = ev.box
+                # 커브를 돌며 차가 돌아서 표지판이 옆으로 빠진 것은 옆길에 다가간 것이 아니다 (sim 커브 뒤 우회전: 일찍 돎)
+                self._seen_straight = self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30) and \
+                    (self._last_pid is None or abs(self._last_pid.steering) < getattr(cfg, "CURVE_HOLD_STEER", 0.3))
+            return
         if ev.kind == "TURN":
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
             # 직진 중에 우회전으로 바뀌어 선을 가로지른 일이 있었다
@@ -378,6 +395,7 @@ class Controller:
         self._wide_wait = 0
         self._far_open_hist.clear()
         self._far_lr_run = 0
+        self._seen_dir, self._seen_age, self._seen_max_h = None, 999, 0.0
         self._seek = False
         self._turn_ambiguous = False
         self._stuck = self._kick = 0
@@ -677,7 +695,26 @@ class Controller:
             return Command(action="STOP")
         return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
 
+    def _sign_gone(self):
+        """넓은 바깥 도로(28cm)에서 경계로 옆길 입구를 끝내 못 볼 때의 마지막 수단: 회전 표지판이 충분히 크게(가깝게) 보였다가
+        SIGN_GONE_FRAMES 동안 안 보이면(화면 옆으로 빠짐) 옆길에 거의 왔다. 표지판은 옆길 건너편 모서리에 있다.
+        실차 run_20261111_202356: 가까운 띠는 블록 쪽 경계가 화면 밖, 먼 띠는 반대쪽만 보여 경계가 내내 L-/L-/-R 로
+        안 바뀌었고, 우회전 표지판을 7초 동안 보고도 옆길을 지나쳤다."""
+        cfg = self.cfg
+        if not getattr(cfg, "SIGN_GONE_ENTRY", 0) or self.pending_turn not in ("LEFT", "RIGHT"):
+            return False
+        # 회전할 쪽 화면 끝으로 빠져나간 표지판만 센다 (반대쪽으로 빠지면 길 건너편 표지판이라 옆길 위치와 상관없다. sim)
+        box, w, m = self._seen_box, cfg.CAMERA_SIZE[0], getattr(cfg, "SIGN_GONE_EDGE", 100)
+        if box is None or not (box[2] >= w - m if self.pending_turn == "RIGHT" else box[0] <= m):
+            return False
+        return (self._seen_dir == self.pending_turn and self._seen_straight
+                and self._seen_max_h >= getattr(cfg, "SIGN_GONE_MIN_H", 50)
+                and getattr(cfg, "SIGN_GONE_FRAMES", 20) <= self._seen_age <= getattr(cfg, "SIGN_GONE_MAX_AGE", 60)
+                and self._near_lr_age > getattr(cfg, "WIDE_NEAR_LR_AGE", 40)
+                and self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30))
+
     def _tick_timers(self):
+        self._seen_age = min(self._seen_age + 1, 999)
         if self._speed_frames:
             self._speed_frames -= 1
             if self._speed_frames == 0:
@@ -790,6 +827,11 @@ class Controller:
                     and self._far_closed_after_open():
                 self._start_turn(self.pending_turn, getattr(self.cfg, "WIDE_FAR_CLOSE_ENTRY", 40),
                                  "넓은 길 옆길 (먼 띠가 옆길 끝을 지남)", edges)
+                cmd = self._turning(state, error, edges)
+            if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
+                    and self._sign_gone():
+                self._start_turn(self.pending_turn, getattr(self.cfg, "SIGN_GONE_ENTRY", 20),
+                                 f"넓은 길 옆길 (표지판 {self._seen_max_h:.0f}px 뒤 화면 밖)", edges)
                 cmd = self._turning(state, error, edges)
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._wide_side_wait(edges):

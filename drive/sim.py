@@ -382,7 +382,8 @@ class Sim:
         self.res = self.det.process(frame)
         if self.signs is not None and not self.ctrl.sign_paused():   # main.py 와 같은 순서: 표지판 이벤트 먼저
             for ev in self.signs.step(self.steps, veh.x, veh.y, veh.psi, self.t):
-                self.sign_log.append((self.t, ev))
+                if ev.kind != "TURN_SEEN":
+                    self.sign_log.append((self.t, ev))
                 self.ctrl.on_sign(ev)
         prev = self.cmd.action if self.cmd else None
         self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg), self.res.ahead_green)

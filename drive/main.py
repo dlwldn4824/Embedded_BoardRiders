@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import queue
 import sys
 import threading
@@ -165,28 +166,48 @@ class OfflineSource:
 
 
 class Recorder(threading.Thread):
-    """flip한 전체 해상도 프레임을 JPG로 저장 (offline 튜닝용). 밀리면 버린다."""
+    """flip한 프레임을 JPG로 저장 (offline 튜닝용). 밀리면 버린다.
 
-    def __init__(self, out_dir):
+    주행이 느려지지 않도록 줄여서 저장한다:
+    RECORD_EVERY 프레임마다 1장, RECORD_SCALE 배 크기, JPG 품질 RECORD_QUALITY.
+    저장 스레드는 우선순위를 낮춰 주행 루프와 표지판 인식보다 뒤로 밀린다.
+    analyze_run 은 읽을 때 CAMERA_SIZE 로 다시 키우므로 그대로 쓸 수 있다.
+    """
+
+    def __init__(self, out_dir, cfg=None):
         super().__init__(daemon=True)
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
-        self.q = queue.Queue(maxsize=60)
+        self.every = max(1, int(getattr(cfg, "RECORD_EVERY", 3)))
+        self.scale = float(getattr(cfg, "RECORD_SCALE", 0.5))
+        self.params = [cv2.IMWRITE_JPEG_QUALITY, int(getattr(cfg, "RECORD_QUALITY", 70))]
+        self.q = queue.Queue(maxsize=8)
         self.dropped = 0
         self.start()
 
     def put(self, fid, img):
+        if fid % self.every:
+            return
         try:
             self.q.put_nowait((fid, img))
         except queue.Full:
             self.dropped += 1
 
     def run(self):
+        try:  # 리눅스: 이 스레드만 nice 19
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+        except (AttributeError, OSError):
+            pass
         while True:
             item = self.q.get()
             if item is None:
                 return
-            imwrite(self.out / f"{item[0]:06d}.jpg", item[1])
+            fid, img = item
+            if self.scale != 1.0:
+                img = cv2.resize(img, None, fx=self.scale, fy=self.scale, interpolation=cv2.INTER_AREA)
+            ok, buf = cv2.imencode(".jpg", img, self.params)
+            if ok:
+                buf.tofile(str(self.out / f"{fid:06d}.jpg"))
 
     def close(self):
         self.q.put(None)
@@ -376,6 +397,9 @@ class Runner:
             self.signs.submit(upright, frame.fid)
         notes = []
         for ev in self.signs.poll():
+            if ev.kind == "TURN_SEEN":     # 매 검출마다 오는 "회전 표지판 보임" 신호: 로그에 남기지 않는다
+                ctrl.on_sign(ev)
+                continue
             print(f"[sign] {ev}")
             notes.append(f"sign {ev.cls} {ev.conf:.2f}")
             if ev.kind == "TURN" and getattr(cfg, "SAVE_SIGN_SHOTS", True):
@@ -584,7 +608,7 @@ def main(argv=None):
                                cpu_cores=cfg.SIGN_CPU_CORES)
             signs.start()
         if args.record and args.mode != "offline":
-            recorder = Recorder(args.record)
+            recorder = Recorder(args.record, cfg)
         log_path = Path(args.log) if args.log else \
             ROOT / cfg.LOG_DIR / f"run_{time.strftime('%Y%m%d_%H%M%S')}_{args.mode}.csv"
         log = CsvLog(log_path)
