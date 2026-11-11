@@ -581,8 +581,12 @@ class Controller:
         # 먼 띠는 진짜 열림(real_openings)이어야 한다. 커브는 먼 띠 경계가 화면 밖이라 "모름"(L?/?R)으로 나와 제외된다
         opens = self._opens
         far_real = opens[2] if opens and len(opens) >= 3 else far
+        # C. (교차로로 잡혔을 때만) 가까운 띠에 아직 회전할 쪽 경계가 보이면 옆길이 가까운 띠까지도 안 왔다
+        #    (실차 run_20261111_191835 5303 프레임: -R/--/L- 에서 교차로로 잡혀 우회전, 옆길 앞 블록 모서리로 들어감)
+        turn_side_seen = near[1] == "R" if self.pending_turn == "RIGHT" else near[0] == "L"
         wait = (near != "LR" and mid in (open_pat, "LR") and far == open_pat and far_real == open_pat) or \
-            (in_cross and near != "LR" and mid == "LR" and far == "LR")
+            (in_cross and near != "LR" and mid == "LR" and far == "LR") or \
+            (in_cross and near != "LR" and turn_side_seen and far == open_pat and far_real == open_pat)
         if wait:
             self._wide_wait += 1
         return wait
@@ -645,6 +649,12 @@ class Controller:
         if self._crosswalk_age is not None:
             self._crosswalk_age += 1
         # 커브 판단은 설 자리를 반영한 오차(PID 가 맞추려는 값)로 한다. 곧은 길에서 한쪽에 서 있으면 원래 오차는 남지만 이 값은 0 근처다
+        if state == LOST and self._cross_frames and self._turn is None and edges and len(edges) >= 3 \
+                and edges[-1] in ("LR", "L-", "-R") and getattr(self.cfg, "CROSS_KEEP_ON_LOST", True):
+            # 교차로를 직진하는 중 가까운 · 중간 띠가 둘 다 비고 먼 띠만 건너편 길을 보면 비전은 LOST 로 낸다.
+            # 그때 서지 않고 교차로 직진을 이어 간다 (실차 run_20261111_191835 2760 프레임: 초록불인데 신호등 앞
+            # 교차로 한가운데서 정지, 약 20초 서 있음). 교차로 직진 최대 시간(INTERSECTION_MAX_FRAMES)은 그대로 적용된다
+            state = INTERSECTION
         self._track_curve(state, None if error is None else error + self.lane_offset())
         horn = self._horn_frames > 0
         if horn:

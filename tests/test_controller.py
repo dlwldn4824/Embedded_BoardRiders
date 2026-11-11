@@ -951,3 +951,13 @@ def test_same_sign_right_after_turn_is_ignored():
     assert c.pending_turn is None
     c.on_sign(ev("TURN", "LEFT"))     # 다른 방향은 받는다
     assert c.pending_turn == "LEFT"
+
+
+def test_keep_crossing_when_lost_but_road_ahead():
+    """십자 교차로 직진 중 가까운 · 중간 띠가 비고 먼 띠만 건너편 길(LR)을 보면 비전은 LOST 를 낸다. 서지 않고 계속 간다
+    (실차 run_20261111_191835: 초록불인데 교차로 한가운데서 정지)."""
+    c = make()
+    for _ in range(5):
+        c.update(INTERSECTION, None, edges=["--", "--", "--"])
+    acts = [c.update(LOST, None, edges=["--", "--", "LR"]).action for _ in range(10)]
+    assert "STOP" not in acts and acts[-1] == "CROSS"
