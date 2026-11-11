@@ -91,6 +91,7 @@ class Controller:
         self._last_action = None
         self._run_frames = 0        # 출발 후 프레임 수 (출발 지점 정지선 무시용)
         self._speed_frames = 0
+        self._speed_ignore = 0      # 감속을 켠 뒤 같은 서행 표지판을 무시하는 남은 프레임
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
         self._red_on = False        # 빨간불을 봤고 아직 안 꺼졌다. 멀리서 봐도 바로 서지 않고 횡단보도 앞에서 선다
         self._crosswalk_age = None  # 차 바로 앞 횡단보도(CROSSWALK 이벤트)를 본 뒤 지난 프레임
@@ -126,6 +127,7 @@ class Controller:
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
+        self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
         from collections import deque
         self._err_hist = deque(maxlen=getattr(self.cfg, "CURVE_HIST_FRAMES", 20))   # 커브 판단용 최근 오차
         self._in_curve_now = False
@@ -196,8 +198,11 @@ class Controller:
         elif ev.kind == "HORN":
             self._horn_frames = cfg.HORN_FRAMES
         elif ev.kind == "SPEED":
-            self.speed_scale = float(ev.value)
-            self._speed_frames = cfg.SPEED_FRAMES
+            # 한 표지판에 한 번만: 감속 중이거나 막 끝난 직후에 같은 표지판을 다시 봐도 감속을 다시 켜거나 늘리지 않는다
+            if self._speed_ignore == 0:
+                self.speed_scale = float(ev.value)
+                self._speed_frames = cfg.SPEED_FRAMES
+                self._speed_ignore = getattr(cfg, "SPEED_IGNORE_FRAMES", 0)
         elif ev.kind == "STOP":
             # 이미 서 있거나 막 출발했으면 같은 표지판을 다시 본 것이다 (차 앞에 그대로 보인다)
             if not (self._wait and self._wait[0] == "STOP") and self._stop_ignore == 0:
@@ -563,6 +568,17 @@ class Controller:
             self.pending_turn, self._deferred_turn = self._deferred_turn, None
         if self.pending_turn in ("LEFT", "RIGHT"):
             tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
+            # 넓은 바깥 도로(28cm)에서 좁은 옆길(21cm)로 돌 때: 가까운 띠는 반대쪽 경계가 화면 밖이라("--", 우회전이면 "-R")
+            # 옆길 입구가 보이자마자 교차로로 잡힌다. 그때 먼 띠까지 회전할 쪽이 열려 있으면 옆길 끝(건너편 블록)이
+            # 아직 멀다 -> 먼 띠에 회전할 쪽 경계가 다시 보일 때까지 회전 시작을 미룬다 (sim: 이 경우 20cm 일찍 돌아 모서리를 밟았다)
+            open_pat = "L-" if self.pending_turn == "RIGHT" else "-R"
+            far_side_lost = bool(edges) and len(edges[0]) == 2 and edges[0][0 if self.pending_turn == "RIGHT" else 1] == "-"
+            # 가운데 십자 교차로는 중간 띠도 양쪽이 열려("--") 여기에 걸리지 않는다. 옆길은 중간 띠에 반대쪽 경계가 남아 있다
+            if (not tend and edges and len(edges) >= 3 and far_side_lost and edges[1] == open_pat and edges[2] == open_pat
+                    and self._wide_wait < getattr(self.cfg, "WIDE_SIDE_WAIT_MAX", 0)):
+                self._wide_wait += 1
+                return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
+            self._wide_wait = 0
             late, self._late_entry = self._late_entry, None
             entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
             why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
@@ -588,6 +604,8 @@ class Controller:
                 self.speed_scale = 1.0
         if self._stop_ignore:
             self._stop_ignore -= 1
+        if self._speed_ignore:
+            self._speed_ignore -= 1
         if self._wait:
             self._wait[1] -= 1
             if self._wait[1] <= 0:

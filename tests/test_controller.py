@@ -196,6 +196,22 @@ def test_speed_sign_is_temporary():
     assert c.update(LANE, 0.0).throttle == base
 
 
+def test_speed_sign_seen_again_does_not_extend():
+    """같은 서행 표지판을 여러 프레임 보더라도 감속은 처음 1초뿐이다 (연장도, 다시 켜지지도 않는다)."""
+    c = make()
+    base = c.update(LANE, 0.0).throttle
+    c.on_sign(ev("SPEED", 0.2))
+    run(c, config.SPEED_FRAMES // 2)
+    c.on_sign(ev("SPEED", 0.2))            # 감속 중에 다시 봄 -> 늘어나지 않는다
+    run(c, config.SPEED_FRAMES - config.SPEED_FRAMES // 2)
+    assert c.update(LANE, 0.0).throttle == base
+    c.on_sign(ev("SPEED", 0.2))            # 감속이 끝난 직후 다시 봄 -> 다시 켜지지 않는다
+    assert c.update(LANE, 0.0).throttle == base
+    run(c, config.SPEED_IGNORE_FRAMES)
+    c.on_sign(ev("SPEED", 0.2))            # 한참 뒤 다른 서행 표지판 -> 다시 감속
+    assert c.update(LANE, 0.0).throttle < base
+
+
 def test_finish_ignored_right_after_start():
     c = make()
     c.on_sign(ev("FINISH"))

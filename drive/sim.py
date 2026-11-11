@@ -70,8 +70,10 @@ BODY_PART = (40, 200, 220)
 CAM_W, CAM_H = config.CAMERA_SIZE
 CAM_FOCAL = 320.0      # px. 수평 화각 약 90도
 CAM_PITCH_DEG = 13.4   # 아래로 기울어진 각도. 소실점이 y=164(320x240 기준 82)에 오는 값
-CAM_HEIGHT = 8.8 * ROAD_IN_V / 20   # cm. 가운데 도로(21cm)가 가까운 띠에서 264px가 되는 값.
-# 264/206/143px 는 가운데 도로 사진에서 잰 값이다: 실측 후 실차 사진에서 바깥 도로는 중간/먼 띠 245/188px 로 약 1.2~1.3배 넓게 보였다
+CAM_HEIGHT = 8.8 * 24 / 20   # cm. 가까운 띠에서 도로 24cm 가 264px 로 보이는 높이.
+# 실차 사진(20261110)에서 잰 띠별(가까운/중간/먼) 도로 폭: 가운데 세로 도로(21cm) 233/189/150px, 바깥 도로(28cm) 294/245/188px.
+# 24cm 기준이면 21cm 도로가 231/180/125, 28cm 도로가 308/240/167px 로 실차와 가장 가깝다
+# (21cm 기준으로 두면 바깥 도로가 가까운 띠에서 352px 로 화면보다 넓어져 바깥 도로 전체를 교차로로 봤다)
 CAM_FORWARD = 9.0      # 차체 중심(도는 중심)에서 카메라까지 앞쪽 거리 cm. 카메라는 차 앞쪽 끝에 있다
 CAM_MAX_DIST = 400.0   # 이보다 먼 바닥은 벽으로 칠한다
 NOISE_SIGMA = 5.0      # 픽셀 잡음 표준편차
@@ -108,6 +110,11 @@ STARTS = {
     "corner": (140.0, _BOTTOM, 0.0),                # 오른쪽 아래 커브 앞
     "offset": (50.0, _BOTTOM + 5, -15.0),           # 테두리 쪽으로 5cm 치우치고 15도 틀어짐
     "left_outer": (BORDER + ROAD_OUT / 2, 152.0, -90.0),  # 왼쪽 바깥 도로, 북쪽으로 (오른쪽에 가운데 가로 도로가 열린다)
+    # 보라 경로: 바깥 세로 도로를 북쪽으로 올라가 위쪽 커브를 돈 뒤, 위 바깥 도로(28cm)에서 가운데 세로 도로(21cm)로 회전
+    "top_east": (BORDER + ROAD_OUT / 2, 80.0, -90.0),          # 왼쪽 위 커브 -> 동쪽 -> 우회전
+    # 반대 방향은 커브 전에 출발하면 위쪽 좌회전 표지판이 세로 도로에서 비스듬히 보여(sim 에는 가림이 없다) 커브에서 돈다.
+    # 그래서 커브를 지난 직선에서 출발한다
+    "top_west": (TRACK - 60.0, BORDER + ROAD_OUT / 2, 180.0),  # 위 바깥 도로, 서쪽으로 -> 좌회전
 }
 
 
@@ -482,7 +489,7 @@ def parse_args(argv=None):
     p.add_argument("--log", metavar="CSV", help="로그 경로 (기본 logs/sim_<시각>.csv)")
     p.add_argument("--turn", choices=["LEFT", "RIGHT", "STRAIGHT"],
                    help="방향 표지판을 이미 본 것처럼 다음 교차로 방향을 정해 두고 출발")
-    p.add_argument("--signs", choices=["mission", "left", "red", "side_left", "side_right"],
+    p.add_argument("--signs", choices=["mission", "left", "red", "side_left", "side_right", "purple_right", "purple_left"],
                    help="가상 표지판 시나리오 (drive/sim_signs.py). mission, red 는 --start cross 로")
     p.add_argument("--sign-latency", type=float, default=0.0,
                    help="표지판 검출 지연 초 (Pi 의 YOLO 추론 시간). 검출 주기도 이만큼 길어진다")
