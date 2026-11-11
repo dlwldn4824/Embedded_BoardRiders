@@ -195,6 +195,6 @@ SCENARIOS = {
     # 표지판을 옆길 바로 앞에 둬서, 느린 실차처럼 표지판을 본 뒤 옆길까지 오래 걸리는 경우를 본다
     "side_right": [VirtualSign("right", 42, 118, for_heading=-90)],
     # --start top_east / top_west. 위 바깥 도로(28cm)에서 가운데 세로 도로(21cm, x 89.5~110.5)로 회전 (실차에서 실패하던 보라 경로)
-    "purple_right": [VirtualSign("right", 75, 40, for_heading=0)],
+    "purple_right": [VirtualSign("right", 114, 41, for_heading=0)],
     "purple_left": [VirtualSign("left", 112, 8, for_heading=180)],
 }
