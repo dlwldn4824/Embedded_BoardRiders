@@ -11,6 +11,7 @@ Copyright (c) 2017 Will Roscoe, MIT License. 전문은 drive/LICENSE-donkeycar �
 """
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
@@ -129,7 +130,11 @@ class Controller:
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
         self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
         self._opens = None          # 이번 프레임 띠별 진짜 열림 (real_openings)
-        from collections import deque
+        self._since_curve = 999     # 커브(_in_curve_now)였던 뒤 지난 프레임
+        self._curve_hold = 0        # 커브 중 교차로로 잡혀 직전 조향을 유지한 연속 프레임
+        self._far_open_hist = deque(maxlen=60)   # 최근 프레임마다 먼 띠가 회전할 쪽만 진짜 열렸는지
+        self._near_lr_age = 0       # 가까운 띠가 양쪽 경계(LR)를 본 뒤 지난 프레임 (출발 직후는 넓은 길로 보지 않는다)
+        self._far_lr_run = 0        # 먼 띠가 연속으로 LR 인 프레임
         self._err_hist = deque(maxlen=getattr(self.cfg, "CURVE_HIST_FRAMES", 20))   # 커브 판단용 최근 오차
         self._in_curve_now = False
         self._curve_dir = 0         # +1 오른쪽 커브, -1 왼쪽 커브
@@ -271,7 +276,15 @@ class Controller:
     def throttle_for(self, steering):
         cfg = self.cfg
         t = cfg.BASE_THROTTLE * self.speed_scale * (1.0 - cfg.SLOW_K * abs(steering))
-        return clamp(t, cfg.MIN_THROTTLE, cfg.MAX_THROTTLE)
+        return clamp(t, self._min_throttle(), cfg.MAX_THROTTLE)
+
+    def _min_throttle(self):
+        """서행 표지판 감속 중에는 MIN_THROTTLE(0.28) 보다 낮게 내린다. 0.28 로 묶으면 평소 0.30 과 차이가 없어
+        육안으로 감속이 안 보였다 (실차 2026-11-11). 이미 굴러가는 바퀴는 0.24 근처까지 돌고(sim PWM_KEEP),
+        바퀴 속도는 (세기 - 0.24) 에 비례해 0.252 면 평소(0.30)의 약 20% 다. 1초 뒤 0.30 으로 돌아오면 멈췄더라도 다시 간다."""
+        if self._speed_frames and self.speed_scale < 1.0:
+            return getattr(self.cfg, "SPEED_MIN_THROTTLE", self.cfg.MIN_THROTTLE)
+        return self.cfg.MIN_THROTTLE
 
     def _center_first(self, state, error, edges):
         """곧은 길(중간·먼 띠 양쪽 경계)에서 오차가 CENTER_START_ERROR 를 넘으면 가운데 찾기 모드를 켜고,
@@ -358,11 +371,13 @@ class Controller:
         return self._slow(min(cfg.TURN_THROTTLE + boost, getattr(cfg, "TURN_THROTTLE_MAX", 0.42)))
 
     def _slow(self, throttle):
-        return clamp(throttle * self.speed_scale, self.cfg.MIN_THROTTLE, self.cfg.MAX_THROTTLE)
+        return clamp(throttle * self.speed_scale, self._min_throttle(), self.cfg.MAX_THROTTLE)
 
     def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
         self._done_run = 0
         self._wide_wait = 0
+        self._far_open_hist.clear()
+        self._far_lr_run = 0
         self._seek = False
         self._turn_ambiguous = False
         self._stuck = self._kick = 0
@@ -586,16 +601,56 @@ class Controller:
         turn_side_seen = near[1] == "R" if self.pending_turn == "RIGHT" else near[0] == "L"
         wait = (near != "LR" and mid in (open_pat, "LR") and far == open_pat and far_real == open_pat) or \
             (in_cross and near != "LR" and mid == "LR" and far == "LR") or \
-            (in_cross and near != "LR" and turn_side_seen and far == open_pat and far_real == open_pat)
+            (in_cross and near != "LR" and turn_side_seen and far == open_pat and far_real == open_pat) or \
+            (in_cross and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
+             and far == open_pat and far_real == open_pat)
+        # D. 마지막 줄: 넓은 바깥 도로(가까운 띠가 한참 양쪽 경계를 못 봄)에서 교차로로 잡혔는데 먼 띠가 회전할 쪽만 열려 있으면
+        #    옆길 끝이 아직 멀다 (실차 run_20261111_193404 7767: -R/-R/L- -> --/--/L- 에서 돌아 일찍 들어감).
+        #    가운데 십자 교차로는 들어가기 직전 가까운 띠가 양쪽 경계를 보므로 여기에 걸리지 않는다
         if wait:
             self._wide_wait += 1
         return wait
+
+    def _track_far_close(self, edges, opens):
+        """넓은 바깥 도로용 기록: 먼 띠가 회전할 쪽만 열렸는지, 가까운 띠가 양쪽 경계를 봤는지, 먼 띠 LR 연속 수."""
+        if not edges or len(edges) < 3:
+            return
+        open_pat = "L-" if self.pending_turn == "RIGHT" else "-R"
+        far_real = opens[2] if opens and len(opens) >= 3 else edges[2]
+        # 커브를 나오는 동안 먼 띠는 커브 자체 때문에 회전할 쪽이 열려 보인다 -> 커브가 끝나고 핸들이 곧을 때만 센다
+        straight = self._since_curve > getattr(self.cfg, "WIDE_AFTER_CURVE_FRAMES", 30) and \
+            (self._last_pid is None or abs(self._last_pid.steering) < getattr(self.cfg, "CURVE_HOLD_STEER", 0.3))
+        self._far_open_hist.append(self.pending_turn in ("LEFT", "RIGHT") and far_real == open_pat and straight)
+        self._near_lr_age = 0 if edges[0] == "LR" else self._near_lr_age + 1
+        self._far_lr_run = self._far_lr_run + 1 if edges[2] == "LR" else 0
+
+    def _far_closed_after_open(self):
+        """넓은 바깥 도로(28cm)에서 옆길을 지나치지 않게: 가까운 띠는 블록 쪽 경계가 화면 밖이라 옆길 입구를 못 본다
+        (바깥에 붙어 가면 내내 "모름"). 대신 먼 띠는 옆길이 열렸다가(회전할 쪽만 열림) 옆길 끝(건너편 블록)을 지나면
+        다시 LR 이 된다. 그 순간부터 WIDE_FAR_CLOSE_ENTRY 프레임 뒤 돈다 (sim: 먼 띠 LR 이 x 약 76, 옆길 21cm 는 89.5~110.5).
+        좁은 길은 옆길 전에 가까운 띠가 양쪽 경계(LR)를 보므로 여기에 걸리지 않는다 (기존 옆길 규칙을 쓴다)."""
+        if self.pending_turn not in ("LEFT", "RIGHT") or not getattr(self.cfg, "WIDE_FAR_CLOSE_ENTRY", 0):
+            return False
+        return (sum(self._far_open_hist) >= getattr(self.cfg, "WIDE_FAR_OPEN_MIN", 3)
+                and self._far_lr_run >= 2
+                and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
+                and self._since_curve > getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10))
 
     def _intersection(self, edges=None):
         if self.pending_turn in (None, "STRAIGHT") and self._deferred_turn in ("LEFT", "RIGHT") \
                 and edges and edges[-1] == "GG" and not self._cross_frames:
             # 앞이 막힌 T자라 직진할 수 없다. 받아 둔 다음 방향이 이 교차로 것이다
             self.pending_turn, self._deferred_turn = self._deferred_turn, None
+        if self.pending_turn in ("LEFT", "RIGHT") and self._last_pid is not None and \
+                (self._since_curve <= getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10)
+                 or (abs(self._last_pid.steering) >= getattr(self.cfg, "CURVE_HOLD_STEER", 0.3)
+                     and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40))) \
+                and self._curve_hold < getattr(self.cfg, "CURVE_HOLD_MAX_FRAMES", 40):
+            self._curve_hold += 1
+            # 커브를 도는 중(또는 막 끝남)에 교차로로 잡혔다: 넓은 바깥 도로를 비스듬히 보면 가까운 띠 양쪽이 화면 밖으로 나간다.
+            # 커브 건너편 옆길 표지판을 이미 봐서 회전 방향이 정해져 있으면 커브 안에서 돌아 블록으로 들어갔다 (sim).
+            # 직전 PID 조향을 유지하며 커브를 마저 돈다
+            return Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
         if self.pending_turn in ("LEFT", "RIGHT"):
             tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
             # 넓은 바깥 도로(28cm)에서 좁은 옆길(21cm)로 돌 때: 가까운 띠는 반대쪽 경계가 화면 밖이라("--", 우회전이면 "-R")
@@ -656,6 +711,10 @@ class Controller:
             # 교차로 한가운데서 정지, 약 20초 서 있음). 교차로 직진 최대 시간(INTERSECTION_MAX_FRAMES)은 그대로 적용된다
             state = INTERSECTION
         self._track_curve(state, None if error is None else error + self.lane_offset())
+        self._since_curve = 0 if self._in_curve_now else self._since_curve + 1
+        if state != INTERSECTION:
+            self._curve_hold = 0
+        self._track_far_close(edges, opens)
         horn = self._horn_frames > 0
         if horn:
             self._horn_frames -= 1
@@ -727,6 +786,11 @@ class Controller:
                 if self._side_ages[pat] > 0 or self._side_runs[pat] > 0:
                     d = self.pending_turn
                     self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "앞이 막혀 정한 방향으로", edges)
+            if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
+                    and self._far_closed_after_open():
+                self._start_turn(self.pending_turn, getattr(self.cfg, "WIDE_FAR_CLOSE_ENTRY", 40),
+                                 "넓은 길 옆길 (먼 띠가 옆길 끝을 지남)", edges)
+                cmd = self._turning(state, error, edges)
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._wide_side_wait(edges):
                 cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
