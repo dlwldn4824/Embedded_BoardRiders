@@ -158,7 +158,8 @@ class SimSigns:
 
 
 # ---------------------------------------------------------------- 시나리오 (트랙 좌표 cm, sim.py 트랙 기준)
-# 실습 트랙 도면(200x200cm): 도로 중심선 바깥 x/y = 20, 180 / 가운데 x/y = 100. 가운데 교차로는 90~110.
+# 실습 트랙(200x200cm, 2026-11-11 실측 폭): 도로 중심선 바깥 x/y = 24, 176 / 가운데 x/y = 100.
+# 가운데 교차로는 x 89.5~110.5 (세로 도로 21cm), y 91~109 (가로 도로 18cm).
 # 기둥 표지판은 차가 오는 방향의 오른쪽 길가(도로 중심에서 15cm)에 둔다.
 # 가운데 교차로로 북쪽으로 들어가는 길의 횡단보도 (sim.py 트랙 그림과 같은 자리: 줄 4개 폭 15.4cm, 길이 8cm, y 115~123)
 CROSSWALK_SOUTH = VirtualSign("crosswalk", 100, 119, floor=True, width=15.4, depth=8.0, heading_deg=0)
@@ -179,10 +180,10 @@ SCENARIOS = {
         # 출발점이 교차로 앞이라 방향 표지판은 교차로 오른쪽 앞 모서리에 둔다
         VirtualSign("left", 116, 106, for_heading=-90),
         VirtualSign("right", 42, 86, for_heading=180),
-        VirtualSign("speed_20", 35, 66, for_heading=-90),
+        VirtualSign("speed_20", 43, 66, for_heading=-90),
         # 커브 바로 뒤에 두면 차가 비스듬할 땐 화면 밖, 정면일 땐 너무 가까워서 못 본다. 위쪽 직선 뒤쪽에 둔다
-        VirtualSign("stop", 120, 35, for_heading=0),
-        VirtualSign("red_line", 148, 20, floor=True, width=20, heading_deg=90),
+        VirtualSign("stop", 120, 43, for_heading=0),
+        VirtualSign("red_line", 148, 24, floor=True, width=28, heading_deg=90),
     ],
     # --start cross. 좌회전 표지판 하나만 (회전 타이밍만 보기)
     "left": [VirtualSign("left", 116, 106, for_heading=-90)],
@@ -192,5 +193,5 @@ SCENARIOS = {
     "side_left": [VirtualSign("left", 84, 195, for_heading=0)],   # 80 은 출발 직후 화면 끝에 잘린 채로만 보였다
     # --start left_outer. 왼쪽 바깥 도로를 북쪽으로 가다 옆길(가운데 가로 도로)로 우회전.
     # 표지판을 옆길 바로 앞에 둬서, 느린 실차처럼 표지판을 본 뒤 옆길까지 오래 걸리는 경우를 본다
-    "side_right": [VirtualSign("right", 34, 118, for_heading=-90)],
+    "side_right": [VirtualSign("right", 42, 118, for_heading=-90)],
 }

@@ -11,7 +11,8 @@
     python -m drive.analyze_run logs/rec_right --csv logs/run_20261110_160000_real.csv --turn RIGHT --out logs/ana_right
     python -m drive.analyze_run data/raw/real_20261110/side_move_4 --turn RIGHT --out logs/ana_side4
 
-도로 폭 cm 는 가까운/중간/먼 띠에서 도로 20cm 가 264/206/143px 로 보인다는 값(실차 사진)으로 환산한 추정이다.
+도로 폭 cm 는 가까운/중간/먼 띠에서 가운데 세로 도로(21cm, 2026-11-11 실측)가 264/206/143px 로 보인다는 값(실차 사진)으로 환산한 추정이다.
+참고 실측 폭: 바깥 28cm, 가운데 세로 도로 21cm, 가운데 가로 도로 18cm.
 """
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ from drive import config, vision  # noqa: E402
 from drive.controller import band_edges, real_openings  # noqa: E402
 from drive.main import draw_overlay, _text  # noqa: E402
 
-PX_PER_20CM = (264.0, 206.0, 143.0)   # 가까운·중간·먼 띠에서 도로 20cm 의 픽셀 폭 (처리 해상도 320x240 기준, 실차 사진)
+REF_ROAD_CM = 21.0
+PX_PER_REF = (264.0, 206.0, 143.0)   # 가까운·중간·먼 띠에서 가운데 세로 도로(21cm)의 픽셀 폭 (처리 해상도 320x240 기준, 실차 사진)
 
 
 def frame_index(p: Path):
@@ -99,7 +101,7 @@ def main(argv=None):
                 "/".join(band_edges(res)), "/".join(opens), side]
         for i, b in enumerate(res.bands[:3]):
             wpx = b.width if b.width is not None else (b.right - b.left if b.left is not None and b.right is not None else None)
-            wcm = "" if wpx is None else f"{wpx * 20.0 / PX_PER_20CM[min(i, 2)] * (config.PROC_SIZE[0] / 320.0):.1f}"
+            wcm = "" if wpx is None else f"{wpx * REF_ROAD_CM / PX_PER_REF[min(i, 2)] * (config.PROC_SIZE[0] / 320.0):.1f}"
             line += [b.left, b.right, wpx, wcm, "" if b.learned is None else f"{b.learned:.0f}"]
         line += [r.get("action", ""), r.get("pending", ""), r.get("note", "")]
         w.writerow(line)
