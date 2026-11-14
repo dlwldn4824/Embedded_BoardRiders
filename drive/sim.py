@@ -385,7 +385,8 @@ class Sim:
                 self.sign_log.append((self.t, ev))
                 self.ctrl.on_sign(ev)
         prev = self.cmd.action if self.cmd else None
-        self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg), self.res.ahead_green)
+        self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg), self.res.ahead_green,
+                                    self.res.border_low)
         if self.cmd.action in MOVING_ACTIONS:
             self.wheels = self.car.drive(self.cmd.throttle, self.cmd.steering)
         else:
@@ -506,7 +507,8 @@ def main(argv=None):
     for kv in args.set:
         key, value = kv.split("=", 1)
         old = getattr(cfg, key)   # 없는 이름이면 AttributeError 로 바로 알린다
-        setattr(cfg, key, type(old)(value))
+        # bool("False") 는 True 라서 참·거짓 값은 글자로 본다
+        setattr(cfg, key, value.lower() in ("1", "true", "yes") if isinstance(old, bool) else type(old)(value))
         print(f"config {key}: {old} -> {getattr(cfg, key)}")
     sim = Sim(args, cfg)
     log_path = Path(args.log) if args.log else ROOT / cfg.LOG_DIR / f"sim_{time.strftime('%Y%m%d_%H%M%S')}.csv"

@@ -58,7 +58,8 @@ def main(argv=None):
     base = {}
     for kv in args.set:
         k, v = kv.split("=", 1)
-        base[k] = type(getattr(config, k))(v)
+        old = getattr(config, k)
+        base[k] = v.lower() in ("1", "true", "yes") if isinstance(old, bool) else type(old)(v)   # bool("False") 는 True
     head = f"{'box_h':>5s} {'지연':>5s} {'miss':>5s} {'seed':>4s} | {'도착':>6s} {'LOST':>5s} {'빨간불':>6s} | " + \
            " ".join(f"{k[:8]:>8s}" for k in KINDS)
     print(head)

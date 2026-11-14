@@ -383,7 +383,8 @@ class Runner:
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
-        self.cmd = ctrl.update(res.state, res.error, band_edges(res), near_error(res, cfg), real_openings(res, cfg), res.ahead_green)
+        self.cmd = ctrl.update(res.state, res.error, band_edges(res), near_error(res, cfg), real_openings(res, cfg), res.ahead_green,
+                               res.border_low)
         if ctrl.turn_started:   # 왜 돌기 시작했는지 남긴다 (교차로 / 옆길, 그때 띠 경계)
             d, why, edges = ctrl.turn_started
             print(f"[turn] frame={frame.fid} {d} ({why}) state={res.state} edges={edges}")
@@ -439,6 +440,11 @@ class Runner:
             extra.append(f"next turn: {ctrl.pending_turn}")
         if ctrl._turn:
             extra.append(f"turn {ctrl._turn[0]} {ctrl._turn[1]}")
+        if ctrl._turn is None and ctrl.pending_turn and ctrl._wg_side >= cfg.WIDE_SIDE_MIN_FRAMES:
+            # 넓은 길 회전 대기: 옆길을 봤고 먼 띠에 건너편 블록을 기다리는 중. 화면 끝 경계 기울기 (평평하면 블록 경계가 보임)
+            extra.append(f"wide turn: wait far block  edge slope {ctrl._wg_slope}px{' (flat seen)' if ctrl._wg_flat else ''}")
+        elif ctrl._turn and ctrl._turn_wide and ctrl._turn[1] == "ENTRY":
+            extra.append(f"wide turn: entry  edge slope {ctrl._wg_slope}px  (spin when >= {cfg.WIDE_EXIT_SLOPE_PX})")
         if ctrl._wait:
             extra.append(f"wait {ctrl._wait[0]} {ctrl._wait[1] / hz:.1f}s left")
         elif ctrl._red_on:

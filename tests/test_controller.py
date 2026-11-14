@@ -27,6 +27,22 @@ def run(c, n, state=LANE, error=0.0):
     return [c.update(state, error).action for _ in range(n)]
 
 
+def gate_off(test):
+    """넓은 길 회전 시점(WIDE_TURN_GATE)을 끄고 돌린다. 옆길 판단(_side_branch) 자체를 보는 시험용:
+    먼 띠까지 회전할 쪽이 열린 채(옆길 건너편 블록이 안 보임) 끝나는 장면은 게이트가 켜져 있으면 블록이 보일 때까지 기다린다."""
+    import functools
+
+    @functools.wraps(test)
+    def wrapped():
+        old = config.WIDE_TURN_GATE
+        config.WIDE_TURN_GATE = False
+        try:
+            test()
+        finally:
+            config.WIDE_TURN_GATE = old
+    return wrapped
+
+
 def test_lane_follow_is_pid():
     assert run(make(), 3) == ["PID"] * 3
 
@@ -343,6 +359,7 @@ def test_interpreter_cooldown():
     assert it([det("horn", 6)]) == []
 
 
+@gate_off
 def test_side_branch_turn_after_sign():
     # T자·옆길: 오른쪽 경계는 그대로이고 왼쪽만 열린다 (비전 상태는 ONE_SIDE)
     from drive.vision import ONE_SIDE
@@ -387,6 +404,7 @@ def test_brief_road_glimpse_does_not_end_spin():
     assert c._turn is not None and c._turn[1] == "SPIN"
 
 
+@gate_off
 def test_side_branch_already_open_when_sign_seen():
     # 표지판을 옆길 바로 앞에 두면, 표지판을 알아볼 때 이미 옆길이 열려 있다. 그래도 돈다
     from drive.vision import ONE_SIDE
@@ -409,6 +427,7 @@ def test_turn_sign_ignored_while_crossing():
     assert "TURN" not in run(c, 5, INTERSECTION, None)
 
 
+@gate_off
 def test_side_branch_when_hugging_far_edge():
     # 우회전 옆길에서 왼쪽 선에 붙어 가면 가까운 띠에는 오른쪽 경계가 늘 화면 밖이다. 중간 띠의 양쪽 경계로 기록을 센다
     from drive.vision import ONE_SIDE
@@ -420,6 +439,7 @@ def test_side_branch_when_hugging_far_edge():
     assert acts[-1] == "TURN"
 
 
+@gate_off
 def test_side_window_restarts_when_sign_seen_again():
     # 느린 실차는 표지판을 처음 본 뒤 옆길까지 대기 시간보다 오래 걸린다. 다시 보면 대기 시간을 처음부터 센다
     from drive.vision import ONE_SIDE
@@ -568,6 +588,7 @@ def test_confusing_view_right_after_turn_keeps_turning():
     assert c.update(LANE, 0.0, ["LR", "LR", "LR"]).action == "PID"
 
 
+@gate_off
 def test_side_branch_without_closed_history_far_from_intersection():
     # 실차 사진: 오른쪽 옆길이 계속 L-/L-/L- 로만 보이고 양쪽 경계(LR) 기록이 없다. 교차로에서 멀면 그래도 돈다
     from drive.vision import ONE_SIDE
@@ -617,6 +638,7 @@ def test_no_kick_while_view_changes():
     assert max(thr) == config.TURN_THROTTLE
 
 
+@gate_off
 def test_no_side_turn_when_missing_edge_is_just_off_screen():
     # 오른쪽 경계가 화면 밖이라 안 보이는 것("L?")은 열린 길이 아니다. 경적을 우회전으로 잘못 봐도 돌지 않는다
     from drive.vision import ONE_SIDE
@@ -910,6 +932,7 @@ def test_after_curve_shift_toward_inside():
     assert c._curve_exit > 0 and c.lane_offset() == config.CURVE_EXIT_OFFSET
 
 
+@gate_off
 def test_after_curve_follow_line_before_side_turn():
     # 커브 직후 안쪽으로 붙는 동안 커브 안쪽 모서리가 "열림"처럼 보여도 바로 돌지 않는다.
     # 회전할 쪽 경계를 양쪽 경계로 다시 본 뒤 열리는 옆길에서 돈다
@@ -961,3 +984,131 @@ def test_keep_crossing_when_lost_but_road_ahead():
         c.update(INTERSECTION, None, edges=["--", "--", "--"])
     acts = [c.update(LOST, None, edges=["--", "--", "LR"]).action for _ in range(10)]
     assert "STOP" not in acts and acts[-1] == "CROSS"
+
+
+# ---------------------------------------------------------------- 넓은 길 회전 시점 (보라 경로)
+def _purple_start(profile=None):
+    """바깥 도로에서 우회전 옆길이 먼 띠까지 열려 보이는 상태 (옆길이 아직 앞)."""
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c._near_lr_age = 10 ** 3      # 넓은 바깥 도로: 가까운 띠가 한참 양쪽 경계를 못 봤다 (실차 사이드이동4 는 내내 L-)
+    c.on_sign(ev("TURN", "RIGHT"))
+    seen = ["L-", "L-", "L-"]
+    acts = [c.update(ONE_SIDE, 0.0, seen, None, seen, None, profile).action for _ in range(config.SIDE_OPEN_FRAMES * 3)]
+    return c, acts
+
+
+def test_wide_turn_waits_for_far_block_then_starts():
+    # 실차(보라): 바깥 테두리가 보여 ONE_SIDE 로 옆길 판단을 타서, 옆길이 보이자마자 진입 직진을 시작해 옆길 입구에서 돌았다.
+    # 먼 띠까지 회전할 쪽이 열려 있으면(옆길이 아직 앞) 옆길 판단으로도 돌지 않고, 먼 띠에 옆길 건너편 블록이 보이면 시작한다
+    from drive.vision import ONE_SIDE
+    c, acts = _purple_start()
+    assert "TURN" not in acts and c.pending_turn == "RIGHT"
+    far = ["L-", "L-", "LR"]
+    m = c.update(ONE_SIDE, 0.0, far, None, far)
+    assert m.action == "TURN" and m.steering == 0.0 and c._turn[1] == "ENTRY"
+    assert c._turn[3] == config.WIDE_TURN_ENTRY_FRAMES and c.turn_started[1].startswith("넓은 길")
+
+
+def test_wide_turn_holds_spin_while_far_block_edge_visible():
+    # 진입 직진이 끝나도 옆길 건너편 블록의 옆길 쪽 경계(표지판 아래)가 화면 오른쪽 끝에 평평하게 보이면 더 직진하고,
+    # 기울어지기 시작하면(블록 모서리가 화면 밖으로) 제자리 회전한다
+    from drive.vision import ONE_SIDE
+    flat = {"R": (150, 150, 150), "L": (None, None, None)}
+    c, _ = _purple_start(flat)
+    far = ["L-", "L-", "LR"]
+    for _ in range(config.WIDE_TURN_ENTRY_FRAMES + 10):
+        m = c.update(ONE_SIDE, 0.0, far, None, far, None, flat)
+    assert m.action == "TURN" and m.steering == 0.0 and c._turn[1] == "ENTRY"       # 아직 직진
+    sloped = {"R": (165, 160, 153), "L": (None, None, None)}                           # 끝 - 40px 안쪽 = 12px
+    cmds = [c.update(ONE_SIDE, 0.0, far, None, far, None, sloped) for _ in range(config.WIDE_EXIT_CONFIRM + 1)]
+    assert c._turn[1] == "SPIN" and cmds[-1].steering > 0
+
+
+def test_wide_turn_spins_on_time_when_edge_never_flat():
+    # 블록의 옆길 쪽 경계를 화면 끝에서 평평하게 본 적이 없으면(이미 화면 밖) 진입 직진이 끝나는 대로 돈다
+    from drive.vision import ONE_SIDE
+    sloped = {"R": (165, 160, 153), "L": (None, None, None)}
+    c, _ = _purple_start(sloped)
+    far = ["L-", "L-", "LR"]
+    for _ in range(config.WIDE_TURN_ENTRY_FRAMES + 1):
+        c.update(ONE_SIDE, 0.0, far, None, far, None, sloped)
+    assert c._turn[1] == "SPIN"
+
+
+def test_wide_turn_ignores_brief_false_opening_on_plain_road():
+    # 커브 출구 등에서 잠깐(몇 프레임) 회전할 쪽이 열려 보였다가 보통 길(먼 띠 LR)로 돌아오면 돌지 않는다.
+    # 먼 띠에 경계가 다시 보여도 중간 띠까지 경계가 보이면 옆길이 아니라 길이 이어지는 것이다
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c._near_lr_age = 10 ** 3
+    c.on_sign(ev("TURN", "RIGHT"))
+    seen = ["L-", "L-", "L-"]
+    for _ in range(config.WIDE_SIDE_MIN_FRAMES - 1):
+        c.update(ONE_SIDE, 0.0, seen, None, seen)
+    road = ["LR", "LR", "LR"]
+    acts = [c.update(LANE, 0.0, road, None, road).action for _ in range(30)]
+    assert "TURN" not in acts and c.pending_turn == "RIGHT"
+    c2, _ = _purple_start()                       # 옆길을 충분히 본 뒤라도
+    curve_exit = ["--", "LR", "LR"]               # 중간 띠까지 경계가 보이면 건너편 블록이 아니다
+    m = c2.update(INTERSECTION, None, curve_exit, None, curve_exit)
+    assert c2._turn is None and m.action == "CROSS"
+
+
+def test_wide_turn_spins_when_edge_drops_below_view():
+    # 진입 직진 중 차가 회전 쪽으로 틀어지면 화면 끝 초록이 잰 영역 아래 끝까지 이어져 세 값이 같아진다(평평처럼 보임).
+    # 경계가 화면 아래로 나간 것이라 기울어짐처럼 보고 돈다 (sim curve_turn: 평평으로 읽어 14cm 늦게 돌아 초록을 밟았다)
+    from drive.vision import ONE_SIDE
+    flat = {"R": (150, 150, 150), "L": (None, None, None), "bottom": 219}
+    c, _ = _purple_start(flat)
+    far = ["L-", "L-", "LR"]
+    for _ in range(config.WIDE_TURN_ENTRY_FRAMES + 5):
+        c.update(ONE_SIDE, 0.0, far, None, far, None, flat)
+    assert c._turn[1] == "ENTRY"                                                      # 경계가 보여 아직 직진
+    low = {"R": (219, 219, 219), "L": (None, None, None), "bottom": 219}
+    for _ in range(config.WIDE_EXIT_CONFIRM + 1):
+        c.update(ONE_SIDE, 0.0, far, None, far, None, low)
+    assert c._turn[1] == "SPIN"
+
+
+def test_wide_turn_not_on_narrow_road():
+    # 좁은 길(가까운 띠가 방금 양쪽 경계를 봄)에서 차가 비스듬해 한쪽 경계가 화면 밖으로 나가 L-/L-/L- 가 돼도
+    # 넓은 길 회전 대기를 하지 않고 예전 옆길 판단대로 돈다 (sim 한계 시험: 가운데 세로 도로에서 막아서 실패)
+    from drive.vision import ONE_SIDE
+    c = make()
+    c._since_cross = 10 ** 6
+    c.on_sign(ev("TURN", "RIGHT"))
+    road = ["LR", "LR", "LR"]
+    for _ in range(5):
+        c.update(LANE, 0.0, road, None, road)
+    seen = ["L-", "L-", "L-"]
+    acts = [c.update(ONE_SIDE, 0.0, seen, None, seen).action for _ in range(config.SIDE_OPEN_FRAMES * 3)]
+    assert "TURN" in acts and c._wg_side == 0
+
+
+def test_wide_turn_gate_off_turns_from_side_branch_as_before():
+    # WIDE_TURN_GATE = False 면 예전처럼 옆길 판단으로 바로 진입 직진을 시작한다
+    old = config.WIDE_TURN_GATE
+    config.WIDE_TURN_GATE = False
+    try:
+        c, acts = _purple_start()
+        assert "TURN" in acts
+    finally:
+        config.WIDE_TURN_GATE = old
+
+
+def test_border_low_flat_and_sloped():
+    # 화면 오른쪽 끝 근처 초록 아래 끝 줄: 옆길 쪽 경계(가로)는 평평, 길 가장자리(소실점 쪽 비스듬)는 끝으로 갈수록 내려간다
+    import numpy as np
+    from drive.vision import border_low
+    m = np.zeros((240, 320), np.uint8)
+    m[:150, 250:] = 255
+    assert border_low(m, 220, "R") == (149, 149, 149)
+    s = np.zeros((240, 320), np.uint8)
+    for u in range(240, 320):
+        s[:int(110 + (u - 240) * 0.5), u] = 255
+    b = border_low(s, 220, "R")
+    assert b[0] - b[2] >= config.WIDE_EXIT_SLOPE_PX
+    assert border_low(np.zeros((240, 320), np.uint8), 220, "L") == (None, None, None)

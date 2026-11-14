@@ -81,10 +81,10 @@ def main(argv=None):
     head = ["fid", "label", "state", "error", "ahead_green", "edges", "opens", "turn_side"]
     for name in ("near", "mid", "far"):
         head += [f"{name}_left", f"{name}_right", f"{name}_width_px", f"{name}_width_cm", f"{name}_learned_px"]
-    head += ["action", "pending", "note"]
+    head += ["border_low", "border_slope", "action", "pending", "note"]
     w.writerow(head)
     vw = None
-    timeline, prev_side, prev_state = [], None, None
+    timeline, prev_side, prev_state, prev_edge = [], None, None, None
     for p in files:
         fid = frame_index(p)
         img = cv2.imread(str(p))
@@ -103,8 +103,20 @@ def main(argv=None):
             wpx = b.width if b.width is not None else (b.right - b.left if b.left is not None and b.right is not None else None)
             wcm = "" if wpx is None else f"{wpx * REF_ROAD_CM / PX_PER_REF[min(i, 2)] * (config.PROC_SIZE[0] / 320.0):.1f}"
             line += [b.left, b.right, wpx, wcm, "" if b.learned is None else f"{b.learned:.0f}"]
+        # 회전할 쪽 화면 끝 초록 아래 끝 줄 (끝 / 20 / 40px 안쪽)과 기울기. 넓은 길 회전(WIDE_TURN_GATE)에서 옆길 건너편
+        # 블록의 옆길 쪽 경계가 평평하게 보이다가(WIDE_EXIT_FLAT_PX 이하) 화면 밖으로 나가기 시작하는지(WIDE_EXIT_SLOPE_PX 이상) 본다
+        bl = res.border_low.get("R" if turn == "RIGHT" else "L") if turn in ("LEFT", "RIGHT") else None
+        slope = bl[0] - bl[-1] if bl and bl[0] is not None and bl[-1] is not None else None
+        line += ["" if bl is None else "/".join("-" if v is None else str(v) for v in bl), "" if slope is None else slope]
         line += [r.get("action", ""), r.get("pending", ""), r.get("note", "")]
         w.writerow(line)
+        edge = None if slope is None else ("flat" if slope <= getattr(config, "WIDE_EXIT_FLAT_PX", 4) else
+                                           "leaving" if slope >= getattr(config, "WIDE_EXIT_SLOPE_PX", 8) else prev_edge)
+        if edge != prev_edge and edge is not None:
+            what = {"flat": "화면 끝에 옆길 건너편 블록 경계가 평평하게 보임",
+                    "leaving": "그 경계가 화면 밖으로 나가기 시작 (기울어짐)"}[edge]
+            timeline.append(f"{fid:6d}  {what} (기울기 {slope}px)  [{line[5]}]")
+            prev_edge = edge
         if side != prev_side and turn:
             what = {"open": "회전할 쪽 초록 경계 사라짐 (진짜 열림)", "unknown": "회전할 쪽 경계가 화면 밖 (모름)",
                     "closed": "회전할 쪽 초록 경계 보임"}.get(side, side)
@@ -120,7 +132,8 @@ def main(argv=None):
             if ov.shape[0] != 480:
                 ov = cv2.resize(ov, (int(ov.shape[1] * 480 / ov.shape[0]), 480))
             col = {"open": (0, 200, 255), "unknown": (0, 0, 255), "closed": (0, 220, 0)}.get(side, (255, 255, 255))
-            _text(ov, f"fid {fid} {label}  {turn or ''} side: {side}", (10, ov.shape[0] - 60), col, 0.6)
+            _text(ov, f"fid {fid} {label}  {turn or ''} side: {side}  edge slope {'-' if slope is None else slope}px",
+                  (10, ov.shape[0] - 60), col, 0.6)
             _text(ov, f"{r.get('action', '')}  pend {r.get('pending', '')}  {r.get('note', '')[:40]}",
                   (10, ov.shape[0] - 35), (255, 255, 255), 0.5)
             if vw is None:

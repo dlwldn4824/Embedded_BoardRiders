@@ -128,13 +128,16 @@ class Controller:
         self._sign_h = None         # 마지막 회전 표지판 상자 높이 (640x480 기준)
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
-        self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
+        self._wide_wait = 0         # 넓은 길에서 회전 시작을 미룬 프레임 (_wide_gate)
         self._opens = None          # 이번 프레임 띠별 진짜 열림 (real_openings)
         self._since_curve = 999     # 커브(_in_curve_now)였던 뒤 지난 프레임
         self._curve_hold = 0        # 커브 중 교차로로 잡혀 직전 조향을 유지한 연속 프레임
         self._far_open_hist = deque(maxlen=60)   # 최근 프레임마다 먼 띠가 회전할 쪽만 진짜 열렸는지
         self._near_lr_age = 0       # 가까운 띠가 양쪽 경계(LR)를 본 뒤 지난 프레임 (출발 직후는 넓은 길로 보지 않는다)
         self._far_lr_run = 0        # 먼 띠가 연속으로 LR 인 프레임
+        self._border = None         # 이번 프레임 화면 끝 초록 아래 줄 (vision border_low)
+        self._wg_clear(None)
+        self._turn_wide = False     # 지금 회전이 넓은 길 회전 시점(_wide_gate)으로 시작됐다 (진입 뒤 모서리 확인)
         self._err_hist = deque(maxlen=getattr(self.cfg, "CURVE_HIST_FRAMES", 20))   # 커브 판단용 최근 오차
         self._in_curve_now = False
         self._curve_dir = 0         # +1 오른쪽 커브, -1 왼쪽 커브
@@ -378,6 +381,8 @@ class Controller:
         self._wide_wait = 0
         self._far_open_hist.clear()
         self._far_lr_run = 0
+        self._wg_clear(None)
+        self._turn_wide = False
         self._seek = False
         self._turn_ambiguous = False
         self._stuck = self._kick = 0
@@ -521,8 +526,23 @@ class Controller:
                 self._gg_seen += 1
                 if self._gg_seen >= getattr(cfg, "TEND_EXTRA_FRAMES", 4):
                     entry = n + 1
+            if self._turn_wide:
+                self._wg_profile(direction)
             if n + 1 >= entry:
-                self._turn[1:3] = ["ARC" if self._seek else "SPIN", 0]
+                # 넓은 길 회전: 옆길 건너편 블록의 옆길 쪽 경계(표지판 아래)가 화면 회전 쪽 끝에 아직 평평하게 보이면 아직 옆길
+                # 가운데까지 안 왔다 -> 제자리 회전을 미루고 더 직진한다. 기울어지기 시작하면(모서리가 화면 밖으로) 돈다.
+                # 경계를 평평하게 본 적이 없거나 화면 끝에 초록이 없으면 원래대로 돈다
+                extra = n + 1 - entry
+                hold = self._turn_wide and extra < getattr(cfg, "WIDE_EXIT_MAX_EXTRA", 40) \
+                    and self._wg_slope is not None and self._wg_flat \
+                    and self._wg_run < getattr(cfg, "WIDE_EXIT_CONFIRM", 2)
+                if hold:
+                    if extra == 0:
+                        self.notice = f"넓은 길: 건너편 블록 경계가 아직 화면 끝에 보여 회전을 미룸 (기울기 {self._wg_slope}px)"
+                else:
+                    if self._turn_wide and extra:
+                        self.notice = f"넓은 길: 회전 시작 ({extra}프레임 더 직진, 기울기 {self._wg_slope}px)"
+                    self._turn[1:3] = ["ARC" if self._seek else "SPIN", 0]
             return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
         if phase == "ARC":
             # 옆으로 살짝 꺾으며 전진한다. 회전할 쪽 초록 경계가 가까운 띠에 다시 보이고 앞쪽(중간 띠)에 새 길의 양쪽
@@ -578,38 +598,114 @@ class Controller:
             return Command(action="STOP")
         return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
 
-    def _wide_side_wait(self, edges, in_cross=False):
-        """넓은 바깥 도로(28cm)에서 좁은 옆길로 돌기 전, 아직 회전을 시작하면 안 되는지.
-        A. 먼 띠까지 회전할 쪽만 열려 있다(중간 띠는 같은 모양이거나 아직 양쪽 경계 LR): 옆길 끝(건너편 블록)이 아직 멀다.
-           가까운 띠는 넓은 길이라 반대쪽 경계가 화면 밖("--", 우회전이면 "-R")이거나 같은 모양이다.
-           가운데 십자 교차로는 중간 띠가 양쪽 다 열려("--") 여기에 걸리지 않는다.
-        B. (교차로로 잡혔을 때만) 가까운 띠만 "--" 이고 중간 · 먼 띠는 양쪽 경계(LR): 길이 그대로 이어진다. 넓은 길이거나
-           커브를 막 나와 비스듬해 가까운 띠 양쪽이 화면 밖으로 나간 것이다 (실차 2026-11-11 18:51 영상: 커브 출구
-           횡단보도에서 우회전을 시작해 블록 모서리로 들어감, sim 에서 같은 장면 재현).
-        기다리는 동안은 곧게 감속 직진한다: PID 로 가면 한쪽 경계만 보고 잡은 중앙이 옆길 쪽으로 쏠려 비스듬히 들어갔다."""
-        if self.pending_turn not in ("LEFT", "RIGHT") or not edges or len(edges) < 3 or len(edges[0]) != 2:
-            return False
-        if self._wide_wait >= getattr(self.cfg, "WIDE_SIDE_WAIT_MAX", 0):
-            return False
-        open_pat = "L-" if self.pending_turn == "RIGHT" else "-R"
+    def _wg_clear(self, direction):
+        """넓은 길 회전 시점(_wide_gate) 기록을 지운다. 회전을 시작해도 지운다 (모서리 확인은 _turn_wide 로 이어 간다)."""
+        self._wg_dir = direction
+        self._wg_side = 0           # 먼 띠까지 회전할 쪽이 열린 것(옆길이 앞에 있음)을 본 프레임 수
+        self._wg_gap = 0            # 그 뒤 옆길을 다시 못 본 프레임
+        self._wg_flat = False       # 화면 회전 쪽 끝에서 블록 아래 끝이 평평했다 (옆길 쪽 경계가 보임)
+        self._wg_run = 0            # 평평한 것을 본 뒤 기울어짐이 이어진 프레임
+        self._wg_slope = None       # 이번 프레임 기울기 (화면 끝 - 40px 안쪽, px). 화면 표시·기록용
+        self._wg_why = ""
+
+    def _wg_profile(self, direction):
+        """화면 회전 쪽 끝에서 초록 아래 끝의 기울기(끝 줄 - 40px 안쪽 줄)를 재고 평평/기울어짐을 센다.
+        평평: 옆길 건너편 블록의 옆길 쪽 경계(표지판 아래)가 화면 끝에 보인다. 기울어짐: 모서리가 화면 밖으로 나가기 시작했다.
+        화면 끝 열의 초록이 잰 영역 아래 끝까지 이어지면 경계가 화면 아래로 나간 것이라 기울어짐과 같이 센다
+        (sim: 진입 직진 중 차가 회전 쪽으로 틀어지면 세 값이 모두 아래 끝에 붙어 평평으로 잘못 읽혀 회전이 늦었다)."""
+        cfg = self.cfg
+        border = self._border or {}
+        b = border.get("R" if direction == "RIGHT" else "L")
+        if not b or b[0] is None or b[-1] is None:
+            self._wg_slope, self._wg_run = None, 0
+            return None
+        slope = self._wg_slope = b[0] - b[-1]
+        bottom = border.get("bottom")
+        if bottom is not None and b[0] >= bottom - getattr(cfg, "WIDE_EXIT_BOTTOM_PX", 2):
+            self._wg_run += 1
+        elif slope <= getattr(cfg, "WIDE_EXIT_FLAT_PX", 4):
+            self._wg_flat, self._wg_run = True, 0
+        elif slope >= getattr(cfg, "WIDE_EXIT_SLOPE_PX", 8):
+            self._wg_run += 1
+        return slope
+
+    def _wide_gate(self, state, edges):
+        """넓은 바깥 도로(28cm)에서 옆길로 돌 때(보라 경로) 회전을 언제 시작할지.
+        반환: None 해당 없음 (원래 옆길·교차로 판단대로) / "HOLD" 아래 1 의 기다림 (예전과 같이 옆길 판단으로 도는 것은
+        막지 않는다) / "WAIT" 아래 2 의 기다림 (옆길 판단으로도 돌지 않는다) / "BLOCK" 2 에서 이번 프레임은 기다림 모양이
+        안 보인다 (평소처럼 달리되 옆길 판단으로 돌지는 않는다) / "GO" 지금 회전을 시작한다.
+
+        1. 기다림 (예전 _wide_side_wait 그대로):
+           A. 먼 띠까지 회전할 쪽만 진짜로 열려 있다(중간 띠는 같은 모양이거나 LR): 옆길 끝(건너편 블록)이 아직 멀다.
+              가까운 띠는 넓은 길이라 반대쪽 경계가 화면 밖("--", 우회전이면 "-R")이거나 같은 모양이다.
+              가운데 십자 교차로는 중간 띠가 양쪽 다 열려("--") 여기에 걸리지 않는다.
+           B. (교차로로 잡혔을 때만) 가까운 띠만 "--" 이고 중간 · 먼 띠는 LR: 길이 그대로 이어진다 (커브 출구, 실차 11-11 18:51).
+           C. (교차로로 잡혔을 때만) 가까운 띠에 아직 회전할 쪽 경계가 보인다: 옆길이 가까운 띠까지도 안 왔다 (실차 run_191835).
+           D. (교차로로 잡혔을 때만) 넓은 길(가까운 띠가 한참 LR 을 못 봄)에서 먼 띠가 회전할 쪽만 열림 (실차 run_193404).
+        2. 넓은 길에서 A 로 옆길을 본 뒤에는 옆길 판단(_side_branch)으로도 바로 돌지 않는다. 실차는 바깥 테두리가 보여 ONE_SIDE 로
+           옆길 판단을 타서, 옆길이 보이자마자(옆길 입구 약 20cm 앞) 진입 직진을 시작해 블록 모서리로 들어갔다.
+           먼 띠에 회전할 쪽 경계가 다시 보이면(옆길 건너편 블록 = 회전하는 쪽 다음 초록) "GO": 호출하는 쪽이 기존 회전
+           (진입 직진 WIDE_TURN_ENTRY_FRAMES -> 제자리 회전 -> 차선 다시 잡기)을 시작한다. 진입 직진이 끝나도 그 블록의
+           옆길 쪽 경계(표지판 아래)가 화면 회전 쪽 끝에 아직 평평하게 보이면 제자리 회전을 미룬다 (_turning 의 ENTRY).
+        기다리는 동안은 곧게 감속 직진한다 (PID 로 가면 한쪽 경계만 보고 잡은 중앙이 옆길 쪽으로 쏠렸다).
+        WIDE_SIDE_WAIT_MAX 를 넘기면 원래 판단으로 넘긴다."""
+        cfg = self.cfg
+        d = self.pending_turn
+        if d != self._wg_dir:
+            self._wg_clear(d)
+        if d not in ("LEFT", "RIGHT") or state not in PID_STATES + (INTERSECTION,) \
+                or not edges or len(edges) < 3 or len(edges[0]) != 2:
+            return None
+        if self._ahead is not None and self._ahead >= getattr(cfg, "TEND_AHEAD_GREEN", 0.75):
+            return None     # 앞이 막힌 T자 끝은 원래 판단대로 (테두리에 닿은 뒤 돈다)
+        if self._wide_wait >= getattr(cfg, "WIDE_SIDE_WAIT_MAX", 0):
+            return None
+        in_cross = state == INTERSECTION
+        open_pat = "L-" if d == "RIGHT" else "-R"
         near, mid, far = edges[0], edges[1], edges[2]
         # 먼 띠는 진짜 열림(real_openings)이어야 한다. 커브는 먼 띠 경계가 화면 밖이라 "모름"(L?/?R)으로 나와 제외된다
         opens = self._opens
         far_real = opens[2] if opens and len(opens) >= 3 else far
-        # C. (교차로로 잡혔을 때만) 가까운 띠에 아직 회전할 쪽 경계가 보이면 옆길이 가까운 띠까지도 안 왔다
-        #    (실차 run_20261111_191835 5303 프레임: -R/--/L- 에서 교차로로 잡혀 우회전, 옆길 앞 블록 모서리로 들어감)
-        turn_side_seen = near[1] == "R" if self.pending_turn == "RIGHT" else near[0] == "L"
-        wait = (near != "LR" and mid in (open_pat, "LR") and far == open_pat and far_real == open_pat) or \
-            (in_cross and near != "LR" and mid == "LR" and far == "LR") or \
+        turn_side_seen = near[1] == "R" if d == "RIGHT" else near[0] == "L"
+        side_ahead = near != "LR" and mid in (open_pat, "LR") and far == open_pat and far_real == open_pat   # A
+        # C. 교차로로 잡혔는데 가까운 띠에 아직 회전할 쪽 경계가 보임 (실차 run_20261111_191835 5303 프레임)
+        # D. 넓은 바깥 도로(가까운 띠가 한참 양쪽 경계를 못 봄)에서 교차로로 잡혔는데 먼 띠가 회전할 쪽만 열림
+        #    (실차 run_20261111_193404 7767). 가운데 십자 교차로는 들어가기 직전 가까운 띠가 양쪽 경계를 봐서 안 걸린다
+        hold = side_ahead or (in_cross and near != "LR" and mid == "LR" and far == "LR") or \
             (in_cross and near != "LR" and turn_side_seen and far == open_pat and far_real == open_pat) or \
-            (in_cross and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
-             and far == open_pat and far_real == open_pat)
-        # D. 마지막 줄: 넓은 바깥 도로(가까운 띠가 한참 양쪽 경계를 못 봄)에서 교차로로 잡혔는데 먼 띠가 회전할 쪽만 열려 있으면
-        #    옆길 끝이 아직 멀다 (실차 run_20261111_193404 7767: -R/-R/L- -> --/--/L- 에서 돌아 일찍 들어감).
-        #    가운데 십자 교차로는 들어가기 직전 가까운 띠가 양쪽 경계를 보므로 여기에 걸리지 않는다
-        if wait:
-            self._wide_wait += 1
-        return wait
+            (in_cross and self._near_lr_age > getattr(cfg, "WIDE_NEAR_LR_AGE", 40)
+             and far == open_pat and far_real == open_pat)                                            # B, C, D
+        # 커브를 도는 중(최근 오차 평균이 큼)에 보이는 열림은 옆길로 세지 않는다 (옆길 판단 _side_branch 와 같은 기준).
+        # 넓은 길(가까운 띠가 한참 양쪽 경계를 못 봄, 13-3 과 같은 기준)에서만 센다. 좁은 길에서 차가 비스듬하면 한쪽 경계가
+        # 화면 밖으로 나가 같은 모양(L-/L-/L-)이 된다 (sim 한계 시험: 가운데 세로 도로에서 17도 틀어진 채 옆길 회전을 막아 실패)
+        curving = len(self._err_hist) >= 5 and \
+            abs(sum(self._err_hist) / len(self._err_hist)) >= getattr(cfg, "CURVE_ERR", 0.25)
+        wide = self._near_lr_age > getattr(cfg, "WIDE_GATE_NEAR_LR_AGE", getattr(cfg, "WIDE_NEAR_LR_AGE", 40))
+        if side_ahead and not curving and wide:
+            self._wg_side += 1
+            self._wg_gap = 0
+        elif self._wg_side:
+            # 옆길을 한동안 다시 못 봤다(건너편 블록도 안 나옴): 잠깐 잘못 본 열림이었다 (커브 출구에서 방향이 흔들릴 때 등)
+            self._wg_gap += 1
+            if self._wg_gap > getattr(cfg, "WIDE_SIDE_GAP_FRAMES", 30):
+                self._wg_side = self._wg_gap = 0
+        if not getattr(cfg, "WIDE_TURN_GATE", True) or self._wg_side < getattr(cfg, "WIDE_SIDE_MIN_FRAMES", 6):
+            if hold:
+                self._wide_wait += 1
+                return "HOLD"       # 예전 기다림: 곧게 가지만 옆길 판단으로 도는 것은 막지 않는다
+            return None
+        self._wide_wait += 1
+        self._wg_profile(d)        # 화면 끝 경계가 평평했는지 기록 (진입 직진 뒤 제자리 회전을 미룰지에 쓴다)
+        far_edge = far[1] == "R" if d == "RIGHT" else far[0] == "L"
+        mid_open = mid[1] == "-" if d == "RIGHT" else mid[0] == "-"
+        if far_edge and mid_open and not side_ahead:
+            # 먼 띠에 회전할 쪽 경계가 다시 보이고 중간 띠는 아직 옆길(열림)이다: 옆길 건너편 블록이 들어왔다.
+            # (중간 띠까지 경계가 보이면 옆길이 아니라 길이 이어지는 것이라 돌지 않는다: 커브 출구, 잘못 본 열림)
+            self._wg_why = f"넓은 길: 먼 띠에 옆길 건너편 블록 ({'/'.join(edges)})"
+            return "GO"
+        # 곧게 가는 것은 이번 프레임에 기다림 모양(A~D)이 보일 때만 (예전과 같다). 안 보이면 평소처럼 달리되 옆길 판단으로
+        # 돌지는 않는다. 커브 출구에서 잘못 본 열림 뒤 비스듬한 채(-30도) 곧게만 가다 밀린 뒤 크게 되꺾었다 (sim)
+        return "WAIT" if hold else "BLOCK"
 
     def _track_far_close(self, edges, opens):
         """넓은 바깥 도로용 기록: 먼 띠가 회전할 쪽만 열렸는지, 가까운 띠가 양쪽 경계를 봤는지, 먼 띠 LR 연속 수."""
@@ -636,29 +732,31 @@ class Controller:
                 and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
                 and self._since_curve > getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10))
 
-    def _intersection(self, edges=None):
-        if self.pending_turn in (None, "STRAIGHT") and self._deferred_turn in ("LEFT", "RIGHT") \
-                and edges and edges[-1] == "GG" and not self._cross_frames:
-            # 앞이 막힌 T자라 직진할 수 없다. 받아 둔 다음 방향이 이 교차로 것이다
-            self.pending_turn, self._deferred_turn = self._deferred_turn, None
+    def _curve_hold_cmd(self):
+        """커브를 도는 중(또는 막 끝남)에 교차로로 잡혔다: 넓은 바깥 도로를 비스듬히 보면 가까운 띠 양쪽이 화면 밖으로 나간다.
+        커브 건너편 옆길 표지판을 이미 봐서 회전 방향이 정해져 있으면 커브 안에서 돌아 블록으로 들어갔다 (sim).
+        직전 PID 조향을 유지하며 커브를 마저 돈다. 해당 없으면 None. (_intersection 과 넓은 길 회전 대기에서 먼저 본다)"""
         if self.pending_turn in ("LEFT", "RIGHT") and self._last_pid is not None and \
                 (self._since_curve <= getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10)
                  or (abs(self._last_pid.steering) >= getattr(self.cfg, "CURVE_HOLD_STEER", 0.3)
                      and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40))) \
                 and self._curve_hold < getattr(self.cfg, "CURVE_HOLD_MAX_FRAMES", 40):
             self._curve_hold += 1
-            # 커브를 도는 중(또는 막 끝남)에 교차로로 잡혔다: 넓은 바깥 도로를 비스듬히 보면 가까운 띠 양쪽이 화면 밖으로 나간다.
-            # 커브 건너편 옆길 표지판을 이미 봐서 회전 방향이 정해져 있으면 커브 안에서 돌아 블록으로 들어갔다 (sim).
-            # 직전 PID 조향을 유지하며 커브를 마저 돈다
             return Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
+        return None
+
+    def _intersection(self, edges=None):
+        if self.pending_turn in (None, "STRAIGHT") and self._deferred_turn in ("LEFT", "RIGHT") \
+                and edges and edges[-1] == "GG" and not self._cross_frames:
+            # 앞이 막힌 T자라 직진할 수 없다. 받아 둔 다음 방향이 이 교차로 것이다
+            self.pending_turn, self._deferred_turn = self._deferred_turn, None
+        hold = self._curve_hold_cmd()
+        if hold is not None:
+            return hold
         if self.pending_turn in ("LEFT", "RIGHT"):
             tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
-            # 넓은 바깥 도로(28cm)에서 좁은 옆길(21cm)로 돌 때: 가까운 띠는 반대쪽 경계가 화면 밖이라("--", 우회전이면 "-R")
-            # 옆길 입구가 보이자마자 교차로로 잡힌다. 그때 먼 띠까지 회전할 쪽이 열려 있으면 옆길 끝(건너편 블록)이
-            # 아직 멀다 -> 먼 띠에 회전할 쪽 경계가 다시 보일 때까지 회전 시작을 미룬다 (sim: 이 경우 20cm 일찍 돌아 모서리를 밟았다)
-            if not tend and self._wide_side_wait(edges, in_cross=True):
-                return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
-            self._wide_wait = 0
+            # 넓은 바깥 도로(28cm)에서 옆길로 돌 때 회전을 미루는 것은 update() 의 _wide_gate 가 먼저 정한다
+            # (여기까지 왔으면 해당 없음이거나 기다림 최대를 넘겼다)
             late, self._late_entry = self._late_entry, None
             entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
             why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
@@ -696,10 +794,12 @@ class Controller:
                 self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None,
-               ahead=None) -> Command:
-        """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
+               ahead=None, border=None) -> Command:
+        """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다.
+        border: 비전 border_low (화면 왼쪽·오른쪽 끝 초록 아래 줄). 넓은 길 회전 시점(_wide_gate)에 쓴다."""
         self._ahead = ahead
         self._opens = opens
+        self._border = border
         self._last_error = error
         if self._crosswalk_age is not None:
             self._crosswalk_age += 1
@@ -750,8 +850,19 @@ class Controller:
                         self._post_frames > getattr(self.cfg, "POST_TURN_MAX_FRAMES", 150):
                     self._post_turn = False
                     self._side_closed = 0
+            # 넓은 바깥 도로에서 옆길로 돌 때: 옆길 건너편 블록이 먼 띠에 보일 때까지 회전 시작을 미룬다 (그 뒤 진입 직진이
+            # 끝나도 그 블록 모서리가 화면 끝에 보이면 _turning 이 제자리 회전을 더 미룬다).
+            # 옆길 판단(_side_branch)은 기록을 위해 그대로 돌리되, 기다리는 동안은 그 판단으로 돌지 않는다
+            gate = None
+            if cmd is None and self._turn is None and not self._post_turn:
+                gate = self._wide_gate(state, edges)
+                if gate == "GO":
+                    flat = self._wg_flat
+                    self._start_turn(self.pending_turn, getattr(self.cfg, "WIDE_TURN_ENTRY_FRAMES", 40),
+                                     self._wg_why, edges)
+                    self._turn_wide, self._wg_flat = True, flat   # 진입 직진 뒤 모서리 확인에 이어 쓴다
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
-                    and self._side_branch(edges, opens):
+                    and self._side_branch(edges, opens) and gate not in ("WAIT", "BLOCK"):
                 # 먼 띠로 옆길을 알아봤으면(가까운 띠 "모름") 옆길이 그만큼 멀다 -> 더 직진 (SIDE_SKIP_EXTRA_FRAMES).
                 # 표지판보다 옆길이 먼저 열려 있었으면 그만큼 옆길에 가깝다 -> 덜 직진
                 amb = self._side_ambiguous(opens)
@@ -787,13 +898,22 @@ class Controller:
                     d = self.pending_turn
                     self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "앞이 막혀 정한 방향으로", edges)
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
-                    and self._far_closed_after_open():
+                    and gate not in ("WAIT", "BLOCK") and self._far_closed_after_open():
+                # 옆길을 지나치지 않게 (13-3): 먼 띠가 옆길 열림 뒤 다시 LR 이 되면 돈다. _wide_gate 가 기다리는 중이면
+                # 그쪽이 정한다. 이렇게 시작한 회전도 진입 직진 뒤 건너편 블록 경계가 화면 끝에 보이면 제자리 회전을 미룬다
+                flat = self._wg_flat
                 self._start_turn(self.pending_turn, getattr(self.cfg, "WIDE_FAR_CLOSE_ENTRY", 40),
                                  "넓은 길 옆길 (먼 띠가 옆길 끝을 지남)", edges)
+                self._turn_wide, self._wg_flat = getattr(self.cfg, "WIDE_TURN_GATE", True), flat
                 cmd = self._turning(state, error, edges)
-            if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
-                    and self._wide_side_wait(edges):
-                cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="PID")
+            if cmd is None and self._turn is None and not self._post_turn and \
+                    (gate in ("HOLD", "WAIT") or (gate == "BLOCK" and state == INTERSECTION)):
+                # 넓은 길 회전 대기: 곧게 감속 직진한다 (회전할 쪽 경계만 보고 따라가면 물러나는 모서리를 따라 옆길 쪽으로 쏠렸다).
+                # 교차로로 잡혔으면 교차로 판단(_intersection)이 바로 돌지 않게 여기서 정한다. 커브 중이면 직전 조향 유지가 먼저다
+                cmd = self._curve_hold_cmd() if state == INTERSECTION else None
+                if cmd is None:
+                    cmd = Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0,
+                                  action="CROSS" if state == INTERSECTION else "PID")
             if cmd is None and self._turn is not None:
                 cmd = self._turning(state, error, edges)
             if state == INTERSECTION or self._turn is not None or self._post_turn:

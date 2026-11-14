@@ -48,6 +48,20 @@ def green_mask(bgr, a_thr, open_k=0, close_k=0):
     return mask
 
 
+def border_low(mask, limit, side, offsets=(0, 20, 40), cols=4):
+    """화면 한쪽 끝 근처에서 초록의 가장 아래 줄. side "L"/"R", offsets: 끝에서 떨어진 거리(px).
+    각 거리마다 cols 개 열의 '가장 아래 초록 줄' 중앙값. 그 열에 초록이 없으면 None."""
+    w = mask.shape[1]
+    rows = np.arange(limit)[:, None]
+    out = []
+    for k in offsets:
+        cs = [w - 1 - k - c for c in range(cols)] if side == "R" else [k + c for c in range(cols)]
+        low = np.where(mask[:limit, cs] > 0, rows, -1).max(axis=0)
+        good = low[low >= 0]
+        out.append(int(np.median(good)) if good.size else None)
+    return tuple(out)
+
+
 def find_edges(col, start, min_run):
     """1차원 녹색 여부 배열에서 start부터 좌/우로 탐색해
     녹색이 min_run 이상 이어지는 첫 구간의 안쪽 끝 위치를 돌려준다. 없으면 None."""
@@ -94,6 +108,10 @@ class VisionResult:
     error: Optional[float] = None     # (center - 화면중앙) / (화면폭/2), -1~1
     candidate: Optional[str] = None   # 이 프레임만 보고 낸 상태 (None: 유효한 띠 없음)
     ahead_green: float = 0.0          # 먼 띠 위쪽 초록 띠 비율 (앞이 막혔는지)
+    # 화면 왼쪽("L")·오른쪽("R") 끝 근처 초록의 가장 아래 줄: 끝에서 0 / 20 / 40 px 안쪽 (각 4열 중앙값, 없으면 None).
+    # 옆길 건너편 블록의 옆길 쪽 경계가 화면 끝에 보이는지(평평) 모서리가 화면 밖으로 나갔는지(기울어짐) 볼 때 쓴다.
+    # "bottom": 잰 영역의 가장 아래 줄 (값이 여기 닿으면 초록이 화면 아래 끝까지 이어져 경계가 화면 아래로 나간 것)
+    border_low: dict = field(default_factory=dict)
     state: Optional[str] = None       # 떨림 방지를 거친 상태
     offroad_ratio: float = 0.0
     dark: bool = False
@@ -248,6 +266,8 @@ class LaneDetector:
         x0, x1 = int(w * 0.2), int(w * 0.8)
         strip = mask[y0:far.y, x0:x1]
         res.ahead_green = float((strip > 0).mean(axis=1).max()) if strip.size else 0.0
+        res.border_low = {} if dark else {"L": border_low(mask, limit, "L"), "R": border_low(mask, limit, "R"),
+                                          "bottom": limit - 1}
         res.candidate = self._candidate(bands, near, dark, res.offroad_ratio)
         self._no_valid = self._no_valid + 1 if res.candidate is None else 0
         if res.candidate is None:
