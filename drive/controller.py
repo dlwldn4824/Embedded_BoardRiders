@@ -93,6 +93,8 @@ class Controller:
         self._run_frames = 0        # 출발 후 프레임 수 (출발 지점 정지선 무시용)
         self._speed_frames = 0
         self._speed_ignore = 0      # 감속을 켠 뒤 같은 서행 표지판을 무시하는 남은 프레임
+        self._widths = None         # 비전이 익힌 띠별 도로 폭 (update 마다 받음)
+        self._horn_ignore = 0       # 경적을 울린 뒤 같은 경적 표지판을 무시하는 남은 프레임
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
         self._red_on = False        # 빨간불을 봤고 아직 안 꺼졌다. 멀리서 봐도 바로 서지 않고 횡단보도 앞에서 선다
         self._crosswalk_age = None  # 차 바로 앞 횡단보도(CROSSWALK 이벤트)를 본 뒤 지난 프레임
@@ -130,7 +132,10 @@ class Controller:
         self._seen_age = 999        # 그 표지판을 마지막으로 본 뒤 지난 프레임
         self._seen_max_h = 0.0      # 그 표지판이 보인 동안 가장 큰 상자 높이
         self._seen_box = None       # 그 표지판의 마지막 상자
+        self._seen_last_h = 0.0     # 그 표지판의 마지막 상자 높이
+        self._sign_far_frames = 0   # 표지판이 아직 멀어 교차로 회전을 미룬 연속 프레임
         self._seen_straight = False # 마지막으로 봤을 때 곧게 가고 있었다
+        self._steer_hist = deque(maxlen=getattr(cfg, "SIGN_GONE_STEADY_FRAMES", 60))
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
         self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
@@ -165,9 +170,12 @@ class Controller:
                 self._seen_age = 0
                 self._seen_max_h = max(self._seen_max_h, h)
                 self._seen_box = ev.box
+                self._seen_last_h = h
                 # 커브를 돌며 차가 돌아서 표지판이 옆으로 빠진 것은 옆길에 다가간 것이 아니다 (sim 커브 뒤 우회전: 일찍 돎)
+                # 커브 뒤 좌우로 크게 흔들린 직후도 제외한다: 곧게 감속 직진하는 동안 차가 비스듬하면 표지판이 일찍 옆으로 빠졌다
+                # (sim 커브 뒤 우회전 23번: 조향 ±0.7 로 흔들린 뒤 24도 틀어진 채 직진, x 57 에서 표지판이 오른쪽 끝으로 빠짐)
                 self._seen_straight = self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30) and \
-                    (self._last_pid is None or abs(self._last_pid.steering) < getattr(cfg, "CURVE_HOLD_STEER", 0.3))
+                    max(self._steer_hist, default=0.0) < getattr(cfg, "SIGN_GONE_STEER", 0.6)
             return
         if ev.kind == "TURN":
             # 교차로를 지나는 중(직진·회전)에는 방향을 바꾸지 않는다. 교차로 건너편 길의 표지판이 보여
@@ -219,7 +227,10 @@ class Controller:
             # 옆길까지 대기 시간보다 오래 걸린 일이 있었다 (우회전 표지판을 7번 보고도 옆길을 지나침)
             self._pending_age = 0
         elif ev.kind == "HORN":
-            self._horn_frames = cfg.HORN_FRAMES
+            # 한 표지판에 한 번만: 차가 느려 같은 경적 표지판이 몇 초 동안 보여 쿨다운(40)마다 다시 울렸다 (실차 run_20261114_214334: 7번)
+            if self._horn_ignore == 0:
+                self._horn_frames = cfg.HORN_FRAMES
+                self._horn_ignore = getattr(cfg, "HORN_IGNORE_FRAMES", 0)
         elif ev.kind == "SPEED":
             # 한 표지판에 한 번만: 감속 중이거나 막 끝난 직후에 같은 표지판을 다시 봐도 감속을 다시 켜거나 늘리지 않는다
             if self._speed_ignore == 0:
@@ -596,6 +607,23 @@ class Controller:
             return Command(action="STOP")
         return Command(throttle=self._slow(cfg.INTERSECTION_THROTTLE), steering=0.0, action="TURN")
 
+    def _wide_by_width(self):
+        """중간 띠에서 익힌 도로 폭만 보고 넓은 길인지 (폭을 모르면 True: 예전처럼 막지 않는다)."""
+        w = self._widths[1] if self._widths and len(self._widths) > 1 else None
+        return True if not w else w >= getattr(self.cfg, "WIDE_ROAD_MID_PX", 217)
+
+    def _is_wide(self):
+        """넓은 바깥 도로(28cm)인가. 중간 띠에서 익힌 도로 폭이 WIDE_ROAD_MID_PX 이상이면 넓은 길
+        (실측 중간 띠: 21cm 189px, 28cm 245px). 폭을 모르면 예전처럼 가까운 띠가 오래 양쪽 경계를 못 봤는지로 본다.
+        실차 run_20261114_214334: 21cm 길 왼쪽 옆길에서 가까운 띠가 오래 한쪽만 봐서 넓은 길로 잘못 보고,
+        이미 열린 옆길 앞에서 3.7초 곧게 기다렸다가 늦게 돌아 건너편 경계를 밟았다."""
+        # 두 조건을 모두 본다. 폭만 보면 28cm -> 18cm 옆길 우회전(sim)에서 기다림이 켜져 늦게 돌아 경계를 더 밟았다
+        long_one_side = self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
+        w = self._widths[1] if self._widths and len(self._widths) > 1 else None
+        if w:
+            return long_one_side and w >= getattr(self.cfg, "WIDE_ROAD_MID_PX", 217)
+        return long_one_side
+
     def _wide_side_wait(self, edges, in_cross=False):
         """넓은 바깥 도로(28cm)에서 좁은 옆길로 돌기 전, 아직 회전을 시작하면 안 되는지.
         A. 먼 띠까지 회전할 쪽만 열려 있다(중간 띠는 같은 모양이거나 아직 양쪽 경계 LR): 옆길 끝(건너편 블록)이 아직 멀다.
@@ -617,10 +645,14 @@ class Controller:
         # C. (교차로로 잡혔을 때만) 가까운 띠에 아직 회전할 쪽 경계가 보이면 옆길이 가까운 띠까지도 안 왔다
         #    (실차 run_20261111_191835 5303 프레임: -R/--/L- 에서 교차로로 잡혀 우회전, 옆길 앞 블록 모서리로 들어감)
         turn_side_seen = near[1] == "R" if self.pending_turn == "RIGHT" else near[0] == "L"
+        # 폭으로 좁은 길이면 기다리지 않는다 (실차 21cm 왼쪽 옆길에서 3.7초 기다려 늦게 돎). 가까운 띠 기록까지 보면
+        # 28cm 길 초입에서 너무 늦게 켜져 sim 28->21 회전이 일찍 돌았다
+        if not self._wide_by_width():
+            return False
         wait = (near != "LR" and mid in (open_pat, "LR") and far == open_pat and far_real == open_pat) or \
             (in_cross and near != "LR" and mid == "LR" and far == "LR") or \
             (in_cross and near != "LR" and turn_side_seen and far == open_pat and far_real == open_pat) or \
-            (in_cross and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
+            (in_cross and self._is_wide()
              and far == open_pat and far_real == open_pat)
         # D. 마지막 줄: 넓은 바깥 도로(가까운 띠가 한참 양쪽 경계를 못 봄)에서 교차로로 잡혔는데 먼 띠가 회전할 쪽만 열려 있으면
         #    옆길 끝이 아직 멀다 (실차 run_20261111_193404 7767: -R/-R/L- -> --/--/L- 에서 돌아 일찍 들어감).
@@ -649,9 +681,11 @@ class Controller:
         좁은 길은 옆길 전에 가까운 띠가 양쪽 경계(LR)를 보므로 여기에 걸리지 않는다 (기존 옆길 규칙을 쓴다)."""
         if self.pending_turn not in ("LEFT", "RIGHT") or not getattr(self.cfg, "WIDE_FAR_CLOSE_ENTRY", 0):
             return False
+        if self._sign_far():
+            return False
         return (sum(self._far_open_hist) >= getattr(self.cfg, "WIDE_FAR_OPEN_MIN", 3)
                 and self._far_lr_run >= 2
-                and self._near_lr_age > getattr(self.cfg, "WIDE_NEAR_LR_AGE", 40)
+                and self._is_wide()
                 and self._since_curve > getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10))
 
     def _intersection(self, edges=None):
@@ -710,8 +744,22 @@ class Controller:
         return (self._seen_dir == self.pending_turn and self._seen_straight
                 and self._seen_max_h >= getattr(cfg, "SIGN_GONE_MIN_H", 50)
                 and getattr(cfg, "SIGN_GONE_FRAMES", 20) <= self._seen_age <= getattr(cfg, "SIGN_GONE_MAX_AGE", 60)
-                and self._near_lr_age > getattr(cfg, "WIDE_NEAR_LR_AGE", 40)
+                and self._is_wide()
                 and self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30))
+
+    def _sign_far(self):
+        """넓은 바깥 도로에서 회전 표지판이 지금 보이는데 아직 작다(멀다) -> 옆길이 아직 멀다.
+        커브를 나오며 좌우로 흔들리면 넓은 길 가까운 띠 양쪽이 화면 밖으로 나가 교차로로 잡히고, 먼 띠도 커브 때문에
+        열려 보인다. 그때 돌면 옆길 30~50cm 앞 블록으로 들어갔다 (sim 커브 뒤 우회전 60번 중 12번).
+        실차 빨강 우회전 표지판은 45 -> 46 -> 50 -> 63px 이고 63px 가 옆길 앞이라 SIGN_FAR_H(55) 아래면 멀다."""
+        cfg = self.cfg
+        if not getattr(cfg, "SIGN_FAR_H", 0) or self.pending_turn not in ("LEFT", "RIGHT"):
+            return False
+        return (self._seen_dir == self.pending_turn
+                and self._seen_age <= getattr(cfg, "SIGN_FAR_SEEN_FRAMES", 15)
+                and self._seen_last_h < cfg.SIGN_FAR_H
+                and self._is_wide()
+                and self._sign_far_frames < getattr(cfg, "SIGN_FAR_MAX_FRAMES", 80))
 
     def _tick_timers(self):
         self._seen_age = min(self._seen_age + 1, 999)
@@ -723,6 +771,8 @@ class Controller:
             self._stop_ignore -= 1
         if self._speed_ignore:
             self._speed_ignore -= 1
+        if self._horn_ignore:
+            self._horn_ignore -= 1
         if self._wait:
             self._wait[1] -= 1
             if self._wait[1] <= 0:
@@ -733,8 +783,10 @@ class Controller:
                 self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None,
-               ahead=None) -> Command:
-        """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다."""
+               ahead=None, widths=None) -> Command:
+        """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다.
+        widths: 비전이 띠별로 익힌 도로 폭(px, 320 기준). 넓은 바깥 도로(28cm)인지 가리는 데 쓴다."""
+        self._widths = widths
         self._ahead = ahead
         self._opens = opens
         self._last_error = error
@@ -843,13 +895,21 @@ class Controller:
                 self._since_cross = 0
             else:
                 self._since_cross += 1
+            far_sign = cmd is None and state == INTERSECTION and self._turn is None and not self._post_turn \
+                and error is not None and self._sign_far()
+            if not far_sign and state != INTERSECTION:
+                self._sign_far_frames = 0
             if cmd is None:
                 if self._post_turn and state not in PID_STATES + (INTERSECTION,) \
                         and self._post_frames <= getattr(self.cfg, "POST_TURN_MAX_FRAMES", 150):
                     # 회전을 끝낸 직후 다시 헷갈리는 화면(OFF_ROAD/LOST)이 나오면, 도로가 보일 때까지 하던 방향으로 계속 돈다
                     s = self.cfg.TURN_STEERING if self._post_dir == "RIGHT" else -self.cfg.TURN_STEERING
                     cmd = Command(throttle=self._slow(self.cfg.TURN_THROTTLE), steering=s, action="TURN")
-                elif (state in PID_STATES or self._post_turn) and error is not None:
+                elif (state in PID_STATES or self._post_turn or far_sign) and error is not None:
+                    if far_sign:
+                        self._sign_far_frames += 1
+                        if self._sign_far_frames == 1:
+                            self.notice = f"표지판 아직 멂 ({self._seen_last_h:.0f}px) -> 교차로로 안 보고 차선 따라감"
                     if self._last_action != "PID":
                         self.pid.reset()  # 정지/교차로에서 돌아올 때 이전 적분/미분값을 버린다
                     # 차선 안에서 설 자리. 오차에 더하면 차가 그만큼 오른쪽(+)/왼쪽(-)에 선다
@@ -923,6 +983,9 @@ class Controller:
             self._last_turn_dir, self._turn_dir_now, self._since_turn_end = self._turn_dir_now, None, 0
         else:
             self._since_turn_end += 1
+        # 최근 조향 크기 (표지판 사라짐 규칙이 "곧게 왔는지" 볼 때 쓴다. 회전·정지 중은 넣지 않는다)
+        if self._turn is None and cmd.action in ("PID", "CROSS"):
+            self._steer_hist.append(abs(cmd.steering))
         self._last_action = cmd.action
         cmd.horn = horn
         return cmd

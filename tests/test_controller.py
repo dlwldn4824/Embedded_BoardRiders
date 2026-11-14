@@ -997,3 +997,64 @@ def test_sign_leaving_opposite_side_does_not_turn():
     for _ in range(config.SIGN_GONE_FRAMES + 5):
         c.update("ONE_SIDE", -0.17, edges, opens=opens)
         assert not (c.turn_started and "표지판" in c.turn_started[1])
+
+
+def test_wide_road_small_sign_does_not_turn_at_false_intersection():
+    """넓은 바깥 도로에서 회전 표지판이 지금 보이는데 아직 작으면(SIGN_FAR_H 미만) 교차로로 잡혀도 돌지 않고 차선을 따라간다
+    (sim 커브 뒤 우회전: 흔들리며 커브를 나오다 교차로로 잡혀 옆길 30~50cm 앞에서 돎). 크면 돈다."""
+    from drive.signs import SignEvent
+    for h, should_turn in ((45, False), (70, True)):
+        c = Controller(config)
+        c.set_running(True)
+        for _ in range(60):
+            c.update("ONE_SIDE", 0.05, ["-R", "-R", "LR"], opens=["?R", "?R", "LR"])
+        c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (400, 120, 400 + h, 120 + h)))
+        c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (400, 120, 400 + h, 120 + h)))
+        cmd = c.update("INTERSECTION", 0.05, ["--", "L-", "L-"], opens=["--", "L?", "L?"])
+        assert (c._turn is not None) == should_turn, (h, cmd)
+
+
+def test_low_conf_red_on_green_light_still_counts_as_off():
+    """빨간불에 선 뒤 신호가 초록으로 바뀌었는데 모델이 같은 신호등을 낮은 신뢰도의 빨간불로도 낼 때:
+    그 빨간불은 "아직 켜짐"으로 세지 않아 꺼짐(OFF)이 나온다 (실차 run_20261114_214334: 20초 대기)."""
+    it = SignInterpreter(config)
+    red = lambda f, c=0.8: {"cls": "red_light", "conf": c, "box_h": 80, "box_w": 40, "box_cx": 320, "box_y2": 200, "frame_id": f}
+    green = lambda f, c=0.4: {"cls": "green_light", "conf": c, "box_h": 50, "box_w": 40, "box_cx": 320, "box_y2": 200, "frame_id": f}
+    evs = it([red(1)]) + it([red(3)])
+    assert [e.value for e in evs if e.kind == "LIGHT"] == ["RED"]
+    out = []
+    for f in range(10, 40, 7):
+        out += it([red(f, 0.25), green(f)])
+    vals = [e.value for e in out if e.kind == "LIGHT"]
+    assert vals and vals[0] in ("GREEN", "OFF")
+
+
+def test_horn_sounds_once_per_sign():
+    """같은 경적 표지판을 쿨다운마다 다시 봐도 한 번만 울린다."""
+    c = Controller(config)
+    c.set_running(True)
+    c.on_sign(ev("HORN"))
+    assert c._horn_frames == config.HORN_FRAMES
+    for _ in range(60):
+        c.update("LANE", 0.0, ["LR", "LR", "LR"])
+    c.on_sign(ev("HORN"))
+    assert c._horn_frames == 0
+
+
+def test_horn_cut_at_frame_edge_is_ignored():
+    """화면 끝에 잘린 경적 상자는 버린다 (오른쪽 끝만 보이면 우회전과 헷갈림)."""
+    it = SignInterpreter(config)
+    evs = []
+    for f in (1, 3, 5):
+        evs += it([{"cls": "horn", "conf": 0.7, "box_h": 50, "box_w": 30, "box_cx": 625, "box_y2": 200, "frame_id": f}])
+    assert [e for e in evs if e.kind == "HORN"] == []
+
+
+def test_right_overlapping_horn_in_same_frame_is_dropped():
+    """같은 화면에서 경적 상자와 겹치는 우회전 검출은 경적을 잘못 본 것이라 버린다."""
+    it = SignInterpreter(config)
+    evs = []
+    for f in (1, 3, 5):
+        evs += it([{"cls": "horn", "conf": 0.55, "box_h": 50, "box_w": 50, "box_cx": 400, "box_y2": 200, "frame_id": f},
+                   {"cls": "right", "conf": 0.6, "box_h": 52, "box_w": 50, "box_cx": 402, "box_y2": 201, "frame_id": f}])
+    assert [e for e in evs if e.kind == "TURN"] == []

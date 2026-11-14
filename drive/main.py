@@ -407,7 +407,8 @@ class Runner:
             self.last_sign = (f"{ev.cls} {ev.conf:.2f}", time.monotonic())
             ctrl.on_sign(ev)
 
-        self.cmd = ctrl.update(res.state, res.error, band_edges(res), near_error(res, cfg), real_openings(res, cfg), res.ahead_green)
+        self.cmd = ctrl.update(res.state, res.error, band_edges(res), near_error(res, cfg), real_openings(res, cfg), res.ahead_green,
+                               [b.learned for b in res.bands])
         if ctrl.turn_started:   # 왜 돌기 시작했는지 남긴다 (교차로 / 옆길, 그때 띠 경계)
             d, why, edges = ctrl.turn_started
             print(f"[turn] frame={frame.fid} {d} ({why}) state={res.state} edges={edges}")

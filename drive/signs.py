@@ -106,7 +106,12 @@ class SignInterpreter:
         events = []
         seen = set()
         # 빨간불이 꺼졌는지 보려고, 거르기 전에 이번 검출에 빨간불이 있었는지 본다 (크기·신뢰도 상관없이)
-        reds = [d for d in detections if d["cls"] == "red_light"]
+        # 단, 신뢰도가 LIGHT_RED_KEEP_CONF 보다 낮거나 같은 화면에 더 높은 신뢰도의 초록불이 있으면 센지 않는다.
+        # 실차 run_20261114_214334: 초록으로 바뀐 신호등을 낮은 신뢰도의 빨간불로도 계속 내서 "꺼짐"이 안 나왔고 20초 대기 뒤 출발
+        greens = [d for d in detections if d["cls"] == "green_light"]
+        g_best = max((d["conf"] for d in greens), default=0.0)
+        reds = [d for d in detections if d["cls"] == "red_light"
+                and d["conf"] >= getattr(cfg, "LIGHT_RED_KEEP_CONF", 0.0) and d["conf"] >= g_best]
         for d in detections:
             if d.get("frame_id") is not None:
                 self._last_fid = d["frame_id"]
@@ -120,8 +125,26 @@ class SignInterpreter:
                 return False
             return d["box_cx"] - d["box_w"] / 2 <= m or d["box_cx"] + d["box_w"] / 2 >= ref_w - m
 
+        # 같은 화면에서 경적 상자와 겹치는 회전 표지판은 경적을 회전으로 잘못 본 것으로 버린다
+        # (경적 = 파란 원 + 나팔, 우회전 = 파란 원 + 화살표. 실차 2026-11-14: 경적을 가끔 우회전으로 봄)
+        horns = [d for d in detections if d["cls"] == "horn" and "box_cx" in d and "box_w" in d]
+
+        def overlaps_horn(d):
+            if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] != "TURN" or "box_cx" not in d or "box_w" not in d:
+                return False
+            for h in horns:
+                ix = min(d["box_cx"] + d["box_w"] / 2, h["box_cx"] + h["box_w"] / 2) - \
+                    max(d["box_cx"] - d["box_w"] / 2, h["box_cx"] - h["box_w"] / 2)
+                iy = min(d.get("box_y2", 0), h.get("box_y2", 0)) - \
+                    max(d.get("box_y2", 0) - d["box_h"], h.get("box_y2", 0) - h["box_h"])
+                if ix > 0 and iy > 0 and ix * iy >= 0.3 * min(d["box_w"] * d["box_h"], h["box_w"] * h["box_h"]):
+                    return True
+            return False
+
+        detections = [d for d in detections if not overlaps_horn(d)]
+        cut_kinds = getattr(cfg, "SIGN_EDGE_CUT_KINDS", ("TURN",))
         detections = [d for d in detections
-                      if not (cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN" and cut(d))]
+                      if not (cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] in cut_kinds and cut(d))]
         # 비스듬히 본 표지판은 상자가 가늘다. 직진(↑) 표지판을 옆에서 보면 ↗ 처럼 보여 right 로 읽었다 (실차: 출발점
         # 오른쪽 앞 직진 표지판). 학습 데이터의 좌·우 표지판 상자는 95% 가 가로/세로 0.73 이상이다
         min_asp = getattr(cfg, "SIGN_TURN_MIN_ASPECT", 0.7)
@@ -178,6 +201,10 @@ class SignInterpreter:
             if spec is None or d["cls"] in seen:
                 continue
             r = self._rule(d["cls"])
+            if d["cls"] == "green_light" and self._red_fired:
+                # 빨간불에 서 있는 동안은 초록불을 더 너그럽게 받는다 (이미 신호등 앞이라 다른 곳 초록불일 일이 적다)
+                r = dict(r, min_conf=getattr(cfg, "GREEN_WAIT_MIN_CONF", r["min_conf"]),
+                         min_h=getattr(cfg, "GREEN_WAIT_MIN_H", r["min_h"]))
             if d["conf"] < r["min_conf"] or d["box_h"] < r["min_h"] or d.get("box_y2", 0) < r["min_y2"]:
                 continue
             if r.get("center") and not covers_center(d, ref_w):
