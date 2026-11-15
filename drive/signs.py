@@ -213,7 +213,8 @@ class SignInterpreter:
             fid = d["frame_id"]
             hits = self._hits[d["cls"]]
             hits.append(fid)
-            while hits and fid - hits[0] > window:
+            win = r.get("window", window)   # 클래스별 확정 창 (정지선은 화면에 짧게 보여 넓게)
+            while hits and fid - hits[0] > win:
                 hits.popleft()
             if len(hits) < hits_needed:
                 continue  # 한두 프레임 오검출로 동작하지 않도록 연속으로 보일 때만

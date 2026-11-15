@@ -95,6 +95,7 @@ class Controller:
         self._speed_ignore = 0      # 감속을 켠 뒤 같은 서행 표지판을 무시하는 남은 프레임
         self._widths = None         # 비전이 익힌 띠별 도로 폭 (update 마다 받음)
         self._horn_ignore = 0       # 경적을 울린 뒤 같은 경적 표지판을 무시하는 남은 프레임
+        self._red_ignore = 0        # 빨간불 대기를 마치고 출발한 뒤 빨간불을 무시하는 남은 프레임
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
         self._red_on = False        # 빨간불을 봤고 아직 안 꺼졌다. 멀리서 봐도 바로 서지 않고 횡단보도 앞에서 선다
         self._crosswalk_age = None  # 차 바로 앞 횡단보도(CROSSWALK 이벤트)를 본 뒤 지난 프레임
@@ -245,6 +246,8 @@ class Controller:
             # 신호등은 커서 멀리서도 빨간불이 확정된다. 보자마자 서면 횡단보도 한참 앞에서 섰다 (실차).
             # 그래서 빨간불은 기억만 해 두고, 차 바로 앞 횡단보도(CROSSWALK)가 같이 보일 때 선다
             if ev.value == "RED":
+                if self._red_ignore:
+                    return      # 방금 초록·꺼짐으로 출발했다: 같은 신호등의 꺼진 빨강 등을 켜진 빨간불로 다시 본 것이다
                 if not self._before_cross():
                     return      # 이미 교차로 안: 신호가 바뀌어도 서지 않고 빠져나간다
                 self._red_on = True
@@ -257,6 +260,7 @@ class Controller:
                 self._red_on = False
                 if self._wait and self._wait[0] == "RED":
                     self._wait = None   # 바로 출발
+                    self._red_ignore = getattr(cfg, "LIGHT_RESTART_IGNORE_FRAMES", 0)
                     self.notice = "초록불 -> 출발" if ev.value == "GREEN" else "빨간불 꺼짐 -> 출발"
         elif ev.kind == "CROSSWALK":
             self._crosswalk_age = 0
@@ -264,7 +268,11 @@ class Controller:
                 self._stop_for_red("횡단보도 앞")
         elif ev.kind == "FINISH":
             if self._run_frames >= cfg.FINISH_ARM_FRAMES and self._finish_frames is None:
-                self._finish_frames = cfg.FINISH_DELAY_FRAMES
+                extra = 0
+                if ev.box is not None:   # 멀리서(작은 y2) 확정했으면 그만큼 더 간다
+                    extra = round(getattr(cfg, "FINISH_FRAMES_PER_PX", 0.0)
+                                  * max(0.0, getattr(cfg, "FINISH_REF_Y2", 0) - ev.box[3]))
+                self._finish_frames = cfg.FINISH_DELAY_FRAMES + extra
 
     def _before_cross(self):
         """아직 교차로에 들어서지 않았는지 (빨간불에 설 수 있는 곳). 교차로를 직진·회전 중이거나 회전을 막 끝냈으면
@@ -773,6 +781,8 @@ class Controller:
             self._speed_ignore -= 1
         if self._horn_ignore:
             self._horn_ignore -= 1
+        if self._red_ignore:
+            self._red_ignore -= 1
         if self._wait:
             self._wait[1] -= 1
             if self._wait[1] <= 0:
@@ -780,6 +790,7 @@ class Controller:
                     self._stop_ignore = getattr(self.cfg, "STOP_IGNORE_FRAMES", 0)
                 elif self._wait[0] == "RED":
                     self._red_on = False    # 빨간불을 오래 다시 못 봤다: 이 빨간불은 놓고 간다 (교차로 입구에서 또 서지 않게)
+                    self._red_ignore = getattr(self.cfg, "LIGHT_RESTART_IGNORE_FRAMES", 0)
                 self._wait = None
 
     def update(self, state: Optional[str], error: Optional[float], edges=None, near=None, opens=None,

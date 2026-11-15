@@ -27,9 +27,13 @@ def test_wide_road_near_band_cut_is_not_intersection():
     assert _cand(294, 245, 188, ["--", "LR", "LR"]) == LANE
 
 
-def test_narrow_road_near_band_open_is_still_intersection():
-    # 21cm 도로는 예전처럼 가까운 띠가 열리면 교차로
-    assert _cand(233, 189, 150, ["--", "LR", "LR"]) == INTERSECTION
+def test_narrow_road_near_band_cut_is_not_intersection():
+    # 옆길 폭이 띠 간격보다 넓어, 21cm 도로에서도 --/LR/LR 은 가까운 띠가 잘린 것이다
+    assert _cand(233, 189, 150, ["--", "LR", "LR"]) == LANE
+
+
+def test_near_and_mid_open_is_intersection():
+    assert _cand(233, 189, 150, ["--", "--", "LR"]) == INTERSECTION
 
 
 def test_wide_road_side_road_in_mid_band_is_intersection():

@@ -191,15 +191,15 @@ class LaneDetector:
             return None
         if near.wide or (near.edges == "--" and not near.note):
             # 가까운 띠는 양쪽이 열렸는데 먼 띠는 도로가 보인다 -> 교차로.
-            # 단, 넓은 바깥 도로(28cm)는 가까운 띠에서 폭이 화면(320px)을 거의 채워(294px), 차가 조금만 비스듬해도
+            # 단, 바깥 도로(28cm)는 가까운 띠에서 폭이 화면(320px)을 거의 채워(294px), 차가 조금만 비스듬해도
             # 양쪽 경계가 화면 밖으로 나가 "--" 가 된다. 이때 중간·먼 띠가 둘 다 양쪽 경계를 보면 옆길은 아직 앞에도
             # 안 왔다 (옆길은 먼 띠부터 열린다). 실차 run_20261115_222102: 커브 출구에서 --/LR/LR 로 교차로가 잡혀
             # 먼 띠에 옆길이 보이기 46 프레임 전에 진입을 세기 시작했고, 우회전이 일찍 시작돼 안쪽 모서리를 밟았다
+            # 띠 위치(sim 카메라 모델): 가까운 띠 21cm, 중간 26cm, 먼 34cm 앞. 옆길 폭(18~21cm)이 띠 간격(13cm)보다 넓어서
+            # 진짜 옆길이면 가까운 띠가 열릴 때 중간·먼 띠도 옆길 안에 있다. 그래서 도로 폭과 상관없이 잘린 것으로 본다
+            # (run_20261115_230402: 학습 폭 조건 때문에 같은 회전이 또 --/LR/LR 로 일찍 시작했다)
             others = [b for b in bands if b is not near]
-            wide_px = getattr(self.cfg, "WIDE_ROAD_MID_PX", None)
-            mid = others[0] if others else None
-            if (not near.wide and wide_px and mid is not None and mid.learned is not None
-                    and mid.learned >= wide_px and all(b.edges == "LR" and b.center is not None for b in others)):
+            if not near.wide and others and all(b.edges == "LR" and b.center is not None for b in others):
                 primary = max(valid, key=lambda b: b.y)
                 return LANE if primary.edges == "LR" else ONE_SIDE
             return INTERSECTION

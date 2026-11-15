@@ -257,6 +257,18 @@ def test_straight_or_no_sign_crosses_then_stops():
     assert acts[0] == "CROSS" and acts[-1] == "STOP"
 
 
+def test_finish_seen_far_drives_further():
+    # 정지선을 멀리서(작은 y2) 확정하면 FINISH_REF_Y2 에서 확정한 것과 같은 자리에 서도록 더 간다
+    c = make()
+    run(c, config.FINISH_ARM_FRAMES)
+    c.on_sign(SignEvent("FINISH", None, "red_line", 0.9, 0, (200, 320, 440, 330)))
+    extra = round(config.FINISH_FRAMES_PER_PX * (config.FINISH_REF_Y2 - 330))
+    acts = run(c, config.FINISH_DELAY_FRAMES + extra + 3)
+    assert extra > 0
+    assert acts[: config.FINISH_DELAY_FRAMES + extra] == ["PID"] * (config.FINISH_DELAY_FRAMES + extra)
+    assert acts[-1] == "FINISH"
+
+
 # ---------------------------------------------------------------- SignInterpreter
 def det(cls, fid, conf=0.9, h=80, y2=300):
     return {"cls": cls, "conf": conf, "box_w": 60, "box_h": h, "box_cx": 320, "box_y2": y2, "frame_id": fid}
@@ -280,6 +292,18 @@ def test_interpreter_red_line_uses_position():
     assert it([det("red_line", 1, h=8, y2=200)]) == [] and it([det("red_line", 2, h=8, y2=200)]) == []
     it([det("red_line", 3, h=8, y2=450)])
     assert [e.kind for e in it([det("red_line", 4, h=8, y2=450)])] == ["FINISH"]
+
+
+def test_interpreter_red_line_confirms_with_one_miss():
+    # 정지선은 화면에 짧게 보인다. 검출 한 번(약 10 프레임)을 놓쳐도 30 프레임 안 두 번이면 확정
+    it = SignInterpreter(config)
+    assert it([det("red_line", 1, h=8, y2=340, conf=0.45)]) == []
+    assert [e.kind for e in it([det("red_line", 22, h=8, y2=370, conf=0.45)])] == ["FINISH"]
+
+
+def test_interpreter_red_line_too_far_is_ignored():
+    it = SignInterpreter(config)
+    assert it([det("red_line", 1, h=8, y2=300)]) == [] and it([det("red_line", 5, h=8, y2=300)]) == []
 
 
 def test_interpreter_crosswalk_only_when_close_and_ahead():
@@ -1058,3 +1082,21 @@ def test_right_overlapping_horn_in_same_frame_is_dropped():
         evs += it([{"cls": "horn", "conf": 0.55, "box_h": 50, "box_w": 50, "box_cx": 400, "box_y2": 200, "frame_id": f},
                    {"cls": "right", "conf": 0.6, "box_h": 52, "box_w": 50, "box_cx": 402, "box_y2": 201, "frame_id": f}])
     assert [e for e in evs if e.kind == "TURN"] == []
+
+
+def test_red_seen_again_right_after_green_start_is_ignored():
+    """빨간불에 섰다가 꺼짐으로 출발한 직후 같은 신호등의 꺼진 빨강 등을 빨간불로 다시 봐도 서지 않는다
+    (실차 run_20261115_230402: 2초 뒤 다시 서서 21초 대기). 한참 뒤의 빨간불은 다시 받는다."""
+    c = make()
+    c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    assert run(c, 3)[-1] == "RED"
+    c.on_sign(ev("LIGHT", "OFF"))
+    run(c, 30)
+    c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    assert "RED" not in run(c, 5)
+    run(c, config.LIGHT_RESTART_IGNORE_FRAMES)
+    c.on_sign(ev("LIGHT", "RED"))
+    c.on_sign(ev("CROSSWALK"))
+    assert run(c, 3)[-1] == "RED"
