@@ -427,6 +427,9 @@ class Controller:
         self._last_view = None
         self._turn = [direction, "ENTRY", 0, entry_frames or self.cfg.TURN_ENTRY_FRAMES]
         self.pending_turn = None
+        w = self._widths[1] if getattr(self, "_widths", None) and len(self._widths) > 1 and self._widths[1] else None
+        if w:
+            why += f" [중간 띠 폭 {w:.0f}px]"   # 넓은 길(WIDE_ROAD_MID_PX)로 봤는지 로그에서 확인
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
     def _side_is_open(self, seen, open_pat, n=2):
