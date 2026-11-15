@@ -739,6 +739,13 @@ class Controller:
                 # 안쪽 모서리를 밟았다
                 entry = self.cfg.TURN_ENTRY_FRAMES + getattr(self.cfg, "NEAR_CUT_EXTRA_ENTRY", 0)
                 why = "교차로 (가까운 띠만 잘림: 늦게)"
+            elif not tend and not late and self.pending_turn == "LEFT":
+                w = self._widths[1] if self._widths and len(self._widths) > 1 else None
+                if w and w >= getattr(self.cfg, "WIDE_ROAD_MID_PX", 230):
+                    # 넓은 바깥 도로에서 일반 교차로로 잡힌 좌회전 (파랑 경로: 오른쪽 바깥 도로 -> 가운데 가로 도로 18cm).
+                    # 실차에서 살짝 늦게 돌아 건너편 섬을 밟았다 (run_20261116_010356)
+                    entry = self.cfg.TURN_ENTRY_FRAMES + getattr(self.cfg, "WIDE_LEFT_ENTRY_ADJ", 0)
+                    why = "교차로 (넓은 길 좌회전: 일찍)"
             self._near_cut = False
             self._start_turn(self.pending_turn, entry, why, edges)
             self._tend, self._gg_seen = tend, 0
