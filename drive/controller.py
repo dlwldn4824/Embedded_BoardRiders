@@ -732,7 +732,8 @@ class Controller:
             late, self._late_entry = self._late_entry, None
             entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
             why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
-            if not tend and not late and self._near_cut:
+            if not tend and not late and self._near_cut and \
+                    self.pending_turn in getattr(self.cfg, "NEAR_CUT_EXTRA_DIRS", ("LEFT", "RIGHT")):
                 # 이 교차로는 가까운 띠 경계만 화면 밖으로 잘리고 중간·먼 띠는 양쪽 경계가 보일 때(--/LR/LR) 잡혔다: 옆길이 아직
                 # 앞이다 (띠 21/26/34cm 앞, 옆길 폭 18~21cm). 실차 run_20261115_232905 등: 그대로 진입을 세면 3~5초 일찍 돌아
                 # 안쪽 모서리를 밟았다

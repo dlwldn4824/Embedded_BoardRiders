@@ -1119,3 +1119,18 @@ def test_near_band_cut_intersection_turns_later():
     normal, cut = frames_to_turn(["--", "--", "LR"]), frames_to_turn(["--", "LR", "LR"])
     assert normal is not None and cut is not None
     assert abs((cut - normal) - config.NEAR_CUT_EXTRA_ENTRY) <= 2
+
+
+def test_near_band_cut_does_not_delay_left_turn():
+    """가까운 띠만 잘린 교차로라도 좌회전은 늦추지 않는다 (NEAR_CUT_EXTRA_DIRS, 실차 run_20261116_005205)."""
+    def frames_to_turn(first_edges):
+        c = make()
+        c.pending_turn = "LEFT"
+        for _ in range(60):
+            c.update(LANE, 0.0, ["LR", "LR", "LR"])
+        for i in range(400):
+            cmd = c.update(INTERSECTION, None, first_edges if i == 0 else ["--", "--", "-R"])
+            if cmd.action == "TURN" and abs(cmd.steering) > 0.5:
+                return i
+        return None
+    assert abs(frames_to_turn(["--", "LR", "LR"]) - frames_to_turn(["--", "--", "-R"])) <= 2
