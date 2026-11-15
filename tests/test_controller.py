@@ -1100,3 +1100,22 @@ def test_red_seen_again_right_after_green_start_is_ignored():
     c.on_sign(ev("LIGHT", "RED"))
     c.on_sign(ev("CROSSWALK"))
     assert run(c, 3)[-1] == "RED"
+
+
+def test_near_band_cut_intersection_turns_later():
+    """교차로가 --/LR/LR (가까운 띠만 잘림) 으로 잡히면 진입을 NEAR_CUT_EXTRA_ENTRY 만큼 늘려 늦게 돈다
+    (실차 빨강 경로 우회전이 3~5초 일찍 돌았다). 보통 교차로(--/--/LR)는 그대로."""
+    def frames_to_turn(first_edges):
+        c = make()
+        c.pending_turn = "RIGHT"
+        for _ in range(60):
+            c.update(LANE, 0.0, ["LR", "LR", "LR"])
+        for i in range(400):
+            edges = first_edges if i == 0 else ["--", "--", "LR"]
+            cmd = c.update(INTERSECTION, None, edges)
+            if cmd.action == "TURN" and abs(cmd.steering) > 0.5:   # 진입(직진)을 마치고 실제로 돌기 시작
+                return i
+        return None
+    normal, cut = frames_to_turn(["--", "--", "LR"]), frames_to_turn(["--", "LR", "LR"])
+    assert normal is not None and cut is not None
+    assert abs((cut - normal) - config.NEAR_CUT_EXTRA_ENTRY) <= 2

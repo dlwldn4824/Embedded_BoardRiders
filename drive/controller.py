@@ -73,6 +73,7 @@ class Command:
     steering: float = 0.0
     action: str = "STOP"   # PID / CROSS / TURN (움직임) | STOP / PAUSE / RED / FINISH (정지)
     horn: bool = False
+    inner: Optional[float] = None   # 정하면 안쪽 바퀴(조향 쪽) PWM 을 이 값으로 (음수 = 역회전). 회전 중 밀기에서만 쓴다
 
 
 class Controller:
@@ -96,6 +97,8 @@ class Controller:
         self._widths = None         # 비전이 익힌 띠별 도로 폭 (update 마다 받음)
         self._horn_ignore = 0       # 경적을 울린 뒤 같은 경적 표지판을 무시하는 남은 프레임
         self._red_ignore = 0        # 빨간불 대기를 마치고 출발한 뒤 빨간불을 무시하는 남은 프레임
+        self._near_cut = False      # 이번 교차로가 --/LR/LR (가까운 띠만 잘림) 으로 잡혔다
+        self._prev_vis_state = None
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
         self._red_on = False        # 빨간불을 봤고 아직 안 꺼졌다. 멀리서 봐도 바로 서지 않고 횡단보도 앞에서 선다
         self._crosswalk_age = None  # 차 바로 앞 횡단보도(CROSSWALK 이벤트)를 본 뒤 지난 프레임
@@ -116,6 +119,7 @@ class Controller:
         self._tend = False          # 지금 회전이 막힌 T자 끝에서 빠져나가는 것인지
         self._gg_seen = 0
         self._stuck = 0             # 회전 중 화면이 그대로인 프레임 (차가 안 돎)
+        self._kick_inner = None     # 밀기 중 안쪽 바퀴 PWM (역회전)
         self._kick = 0              # 세게 미는 남은 프레임
         self._last_view = None
         self.notice = None          # main.py 가 로그로 찍고 지우는 알림
@@ -401,7 +405,9 @@ class Controller:
             self.notice = f"회전 중 화면이 {getattr(cfg, 'TURN_STUCK_FRAMES', 8)} 프레임 그대로 -> 세게 밀기"
         if self._kick > 0:
             self._kick -= 1
+            self._kick_inner = getattr(cfg, "TURN_KICK_INNER", None)
             return self._slow(getattr(cfg, "TURN_KICK_THROTTLE", 0.42))
+        self._kick_inner = None
         # 오래 돌고 있으면(실차: 0.32 로 3초에 30도) 세기를 조금씩 올린다. 잘 도는 회전은 그 전에 끝나 영향이 없다
         boost = max(0, n - getattr(cfg, "TURN_BOOST_AFTER", 35)) * getattr(cfg, "TURN_BOOST_PER_FRAME", 0.005)
         return self._slow(min(cfg.TURN_THROTTLE + boost, getattr(cfg, "TURN_THROTTLE_MAX", 0.42)))
@@ -604,7 +610,8 @@ class Controller:
                     if near_aligned or n + 1 >= getattr(cfg, "TURN_SPIN_HARD_MAX_FRAMES", 200):
                         self._turn[1:3] = ["EXIT", 0]
             s = cfg.TURN_STEERING if direction == "RIGHT" else -cfg.TURN_STEERING
-            return Command(throttle=self._spin_throttle(error, edges, n), steering=s, action="TURN")
+            thr = self._spin_throttle(error, edges, n)
+            return Command(throttle=thr, steering=s, action="TURN", inner=self._kick_inner)
         # EXIT
         if state in PID_STATES:
             self._turn = None
@@ -722,6 +729,13 @@ class Controller:
             late, self._late_entry = self._late_entry, None
             entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
             why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
+            if not tend and not late and self._near_cut:
+                # 이 교차로는 가까운 띠 경계만 화면 밖으로 잘리고 중간·먼 띠는 양쪽 경계가 보일 때(--/LR/LR) 잡혔다: 옆길이 아직
+                # 앞이다 (띠 21/26/34cm 앞, 옆길 폭 18~21cm). 실차 run_20261115_232905 등: 그대로 진입을 세면 3~5초 일찍 돌아
+                # 안쪽 모서리를 밟았다
+                entry = self.cfg.TURN_ENTRY_FRAMES + getattr(self.cfg, "NEAR_CUT_EXTRA_ENTRY", 0)
+                why = "교차로 (가까운 띠만 잘림: 늦게)"
+            self._near_cut = False
             self._start_turn(self.pending_turn, entry, why, edges)
             self._tend, self._gg_seen = tend, 0
             return self._turning(INTERSECTION, edges=edges)
@@ -798,6 +812,12 @@ class Controller:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다.
         widths: 비전이 띠별로 익힌 도로 폭(px, 320 기준). 넓은 바깥 도로(28cm)인지 가리는 데 쓴다."""
         self._widths = widths
+        # 교차로로 처음 잡힌 순간 가까운 띠만 잘린 모양(--/LR/LR)이었는지 기억한다 (회전 진입을 늘린다)
+        if state == INTERSECTION and self._prev_vis_state != INTERSECTION:
+            self._near_cut = bool(edges and len(edges) >= 3 and edges[0] == "--" and all(e == "LR" for e in edges[1:]))
+        elif state != INTERSECTION and self._turn is None and not self._cross_frames:
+            self._near_cut = False
+        self._prev_vis_state = state
         self._ahead = ahead
         self._opens = opens
         self._last_error = error

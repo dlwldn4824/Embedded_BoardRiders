@@ -128,9 +128,14 @@ class Car:
             out.append(new)
         return out[0], out[1]
 
-    def drive(self, throttle, steering):
+    def drive(self, throttle, steering, inner=None):
         left, right = mix(throttle, steering, self.turn_mode,
                           getattr(self.cfg, "INNER_MIN_THROTTLE", 0.0), getattr(self.cfg, "PIVOT_STEER", 1.0))
+        if inner is not None:   # 회전 중 밀기: 안쪽 바퀴를 역회전시켜 제자리에서 돈다 (앞으로 밀려 나가지 않게)
+            if steering < 0:
+                left = inner
+            elif steering > 0:
+                right = inner
         # 좌우 모터 세기 차 보정. 교차로 직진/회전은 시간 기반이라 차가 한쪽으로 휘면 실패한다.
         return self.set_wheels(left, right * getattr(self.cfg, "RIGHT_WHEEL_TRIM", 1.0))
 

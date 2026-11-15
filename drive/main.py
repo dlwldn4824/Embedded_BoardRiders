@@ -419,7 +419,7 @@ class Runner:
             notes.append(ctrl.notice)
             ctrl.notice = None
         if self.cmd.action in MOVING_ACTIONS:
-            self.wheels = car.drive(self.cmd.throttle, self.cmd.steering)
+            self.wheels = car.drive(self.cmd.throttle, self.cmd.steering, getattr(self.cmd, "inner", None))
         else:
             self.wheels = car.stop()
         car.horn(self.cmd.horn)

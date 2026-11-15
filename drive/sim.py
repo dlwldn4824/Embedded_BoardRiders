@@ -389,7 +389,7 @@ class Sim:
         self.cmd = self.ctrl.update(self.res.state, self.res.error, band_edges(self.res), near_error(self.res, self.cfg), real_openings(self.res, self.cfg), self.res.ahead_green,
                                [b.learned for b in self.res.bands])
         if self.cmd.action in MOVING_ACTIONS:
-            self.wheels = self.car.drive(self.cmd.throttle, self.cmd.steering)
+            self.wheels = self.car.drive(self.cmd.throttle, self.cmd.steering, getattr(self.cmd, "inner", None))
         else:
             self.wheels = self.car.stop()
             if prev in MOVING_ACTIONS:
