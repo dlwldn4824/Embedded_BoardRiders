@@ -25,6 +25,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import pruned_modules  # noqa: F401  (sign/prune_kd.py 로 자른 모델을 읽을 때 필요)
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
