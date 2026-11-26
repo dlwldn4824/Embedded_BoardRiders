@@ -141,6 +141,9 @@ class Controller:
         self._sign_far_frames = 0   # 표지판이 아직 멀어 교차로 회전을 미룬 연속 프레임
         self._seen_straight = False # 마지막으로 봤을 때 곧게 가고 있었다
         self._steer_hist = deque(maxlen=getattr(cfg, "SIGN_GONE_STEADY_FRAMES", 60))
+        # 최근 프레임마다 왼쪽·오른쪽이 한 띠에서라도 열렸는지 (경계가 없음). 회전할 쪽이 내내 막혀 있으면 그쪽엔 길이 없다
+        self._side_open_hist = {"L": deque(maxlen=getattr(cfg, "TURN_SIDE_OPEN_FRAMES", 150)),
+                                "R": deque(maxlen=getattr(cfg, "TURN_SIDE_OPEN_FRAMES", 150))}
         self._turn_ambiguous = False  # 지금 옆길 회전이 경계로 판단이 안 되는 상태에서 정해졌는지 (표지판 크기로 시점 보정)
         self._late_entry = None     # 교차로에 들어선 뒤 늦게 온 회전 표지판: 남은 진입 프레임
         self._wide_wait = 0         # 넓은 길에서 옆길 끝이 아직 안 보여 회전 시작을 미룬 프레임
@@ -767,7 +770,11 @@ class Controller:
             # 직전 PID 조향을 유지하며 커브를 마저 돈다
             return Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
         if self.pending_turn in ("LEFT", "RIGHT"):
-            tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
+            thr = getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
+            w = self._widths[1] if self._widths and len(self._widths) > 1 else None
+            if w and w >= getattr(self.cfg, "WIDE_ROAD_MID_PX", 230):
+                thr = getattr(self.cfg, "TEND_AHEAD_GREEN_WIDE", thr)
+            tend = self._ahead is not None and self._ahead >= thr
             if not tend and self._tend_sign_ahead():
                 # T자 끝의 회전 표지판은 바깥 테두리 위, 차 정면에 크게 보인다 (십자 교차로 표지판은 모서리=옆). 테두리 초록
                 # 비율이 기준에 못 미쳐도 막힌 T자로 본다 (실차 run_20261126_122857 84초: 일반 교차로로 40 프레임 만에 돌아
@@ -844,6 +851,9 @@ class Controller:
             (f"크기 {self._seen_max_h:.0f}px", self._seen_max_h >= getattr(cfg, "SIGN_GONE_MIN_H", 50)),
             ("넓은 길", self._is_wide()),
             ("커브 뒤", self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30)),
+            # 회전할 쪽이 최근 한 번도 안 열렸으면 그쪽엔 길이 없다 (실차 134443: 오른쪽 테두리에 둔 좌회전 표지판을 우회전으로
+            # 더 많이 읽음. 오른쪽은 트랙 바깥 테두리라 세 띠 모두 오른쪽 경계가 내내 보였다)
+            ("회전 쪽 열림", any(self._side_open_hist["R" if right else "L"])),
         ]
         age_ok = getattr(cfg, "SIGN_GONE_FRAMES", 20) <= self._seen_age <= getattr(cfg, "SIGN_GONE_MAX_AGE", 60)
         ok = age_ok and all(v for _, v in checks)
@@ -898,6 +908,9 @@ class Controller:
         """edges: 비전 띠별 경계 문자열 목록 (가까운 띠 먼저). 주면 T자·옆길 교차로 회전도 한다.
         widths: 비전이 띠별로 익힌 도로 폭(px, 320 기준). 넓은 바깥 도로(28cm)인지 가리는 데 쓴다."""
         self._widths = widths
+        if edges:
+            self._side_open_hist["L"].append(any("L" not in e and e != "GG" for e in edges))
+            self._side_open_hist["R"].append(any("R" not in e and e != "GG" for e in edges))
         # 교차로로 처음 잡힌 순간 가까운 띠만 잘린 모양(--/LR/LR)이었는지 기억한다 (회전 진입을 늘린다)
         if state == INTERSECTION and self._prev_vis_state != INTERSECTION:
             self._near_cut = bool(edges and len(edges) >= 3 and edges[0] == "--" and all(e == "LR" for e in edges[1:]))

@@ -1249,3 +1249,32 @@ def test_big_sign_gone_mid_frame_still_turns_and_failure_is_logged():
         assert (started is not None) == should, h
         if not should:
             assert any("표지판 사라짐 회전 안 함" in n for n in notes)
+
+
+def test_blocked_t_lower_threshold_on_wide_road_only():
+    """넓은 길에서는 앞 테두리 0.58 이상이면 막힌 T자 (실차 0.61~0.81). 좁은 길은 0.75 그대로."""
+    for widths, tend in (([290, 270, 190], True), ([233, 189, 150], False)):
+        c = make()
+        c.on_sign(ev("TURN", "RIGHT"))
+        for _ in range(5):
+            c.update(LANE, 0.0, ["LR", "LR", "LR"], widths=widths)
+        c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.65, widths=widths)
+        assert c._turn is not None and ("막힌 T자" in c.turn_started[1]) == tend, widths
+
+
+def test_sign_gone_does_not_turn_into_closed_side():
+    """회전할 쪽이 내내 막혀 있으면(세 띠 모두 그쪽 경계가 보임) 표지판 사라짐으로 돌지 않는다 (실차 134443)."""
+    from drive.signs import SignEvent
+    c = Controller(config)
+    c.set_running(True)
+    edges = ["-R", "-R", "LR"]          # 오른쪽 경계가 계속 보임 (오른쪽은 트랙 바깥 테두리)
+    for _ in range(60):
+        c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (500, 100, 600, 200)))
+    c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (540, 100, 630, 200)))
+    notes = []
+    for _ in range(config.SIGN_GONE_MAX_AGE + 5):
+        c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
+        notes.append(c.notice)
+        assert not (c.turn_started and "표지판" in c.turn_started[1])
+    assert any(n and "회전 쪽 열림" in n for n in notes)

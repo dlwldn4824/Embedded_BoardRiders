@@ -155,6 +155,8 @@ SIGN_TURN_TRACK_ASPECT = 0.5
 SIGN_GONE_OPP_EXTRA = 30
 # 회전 표지판이 이 높이(px, 640x480 기준) 이상으로 보였다가 사라지면 화면 끝에 닿지 않았어도 지나친 것으로 본다. 0 이면 끔
 SIGN_GONE_NEAR_H = 90
+# 표지판 사라짐으로 돌 때, 회전할 쪽이 최근 이 프레임 안에 한 띠에서라도 열려 보였어야 한다 (막힌 쪽으로 돌지 않게)
+TURN_SIDE_OPEN_FRAMES = 150
 HORN_CONFUSE_FRAMES = 30        # 경적이 보였던 자리에서 이 프레임 안에 보인 비슷한 크기의 회전 표지판은 경적으로 본다
 SIGN_EDGE_CUT_KINDS = ("TURN", "HORN")   # 화면 끝에 잘린 상자를 버리는 이벤트 종류. 경적 오른쪽 끝만 보이면 우회전으로 헷갈렸다
 SIGN_EDGE_MARGIN = 4            # 회전 표지판 상자가 화면 좌우 끝에서 이 px(640 기준) 안에 닿으면 잘린 것으로 보고 버린다
@@ -232,6 +234,9 @@ TURN_BLOCKED_ENTRY_FRAMES = 3   # 직진하다 앞이 막힌 T자에서 받아 �
 # 막힌 T자 끝에서 빠져나가는 회전: 교차로를 알아볼 때 먼 띠 위 초록 비율(ahead_green)이 TEND_AHEAD_GREEN 이상이면,
 # 정해진 진입 프레임 대신 먼 띠가 테두리(GG)에 닿은 뒤 TEND_EXTRA_FRAMES 더 가서 돈다 (최대 TURN_ENTRY_TEND_MAX)
 TEND_AHEAD_GREEN = 0.75
+# 중간 띠 도로 폭이 WIDE_ROAD_MID_PX 이상일 때의 기준. 실차 1126 로그 [앞 테두리]: 막힌 T자 0.61~0.81 (그때 폭 268~280px),
+# 빨강 옆길 0.63. sim 십자 교차로(21cm, 189px)는 0.68 까지 나와 0.75 를 그대로 쓴다
+TEND_AHEAD_GREEN_WIDE = 0.58
 # 위 비율이 모자라도, 정한 방향의 회전 표지판이 TEND_SIGN_SEEN_FRAMES 안에 화면 가운데(좌우 TEND_SIGN_CENTER 폭 안)에서
 # TEND_SIGN_MIN_H px 이상으로 보였으면 막힌 T자로 본다 (T자 끝 표지판은 차 정면 바깥 테두리 위). 0 이면 끔
 TEND_SIGN_MIN_H = 70
