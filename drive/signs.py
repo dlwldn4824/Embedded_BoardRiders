@@ -89,6 +89,7 @@ class SignInterpreter:
         self._last_fired = {}
         self._hits = defaultdict(deque)   # 클래스별 조건을 통과한 frame_id
         self._last_horn = None            # 마지막 경적 검출 (우회전으로 헷갈린 것 거르기)
+        self._last_lr = None              # 마지막 좌·우회전 검출 (같은 표지판을 반대 방향으로 읽은 것 거르기)
         self._red_fired = False           # 빨간불 이벤트를 냈고 아직 꺼짐(OFF)을 알리지 않았다
         self._red_missing = 0             # 빨간불이 하나도 안 보인 연속 검출 횟수
         self._red_cut = False             # 마지막 빨간불 상자가 화면 끝에 닿았다 (사라지면 꺼진 건지 화면 밖으로 나간 건지 모름)
@@ -185,6 +186,25 @@ class SignInterpreter:
                         and abs(d.get("box_cx", 0) - h.get("box_cx", 0)) < max(d.get("box_w", 0), h.get("box_w", 0), 1) \
                         and 0.6 <= d["box_h"] / max(h["box_h"], 1) <= 1.7:
                     continue
+                keep.append(d)
+            detections = keep
+        # 같은 표지판을 반대 방향으로 읽은 것 거르기: 좌(우)회전으로 읽혔던 자리에서 TURN_FLIP_FRAMES 안에 비슷한 크기의
+        # 우(좌)회전이 보이면 같은 표지판을 비스듬히 보고 잘못 읽은 것으로 보고 버린다. 버린 상자 자리로 기억을 옮겨
+        # 계속 잘못 읽어도 계속 버린다 (실차 run_20261126_115447: 길 건너편 좌회전 표지판을 옆에서 지나가며 right 0.64 로
+        # 읽었고, 그 우회전이 회전 방향을 덮어써 반대로 돌았다)
+        flip_frames = getattr(cfg, "TURN_FLIP_FRAMES", 0)
+        if flip_frames:
+            keep = []
+            for d in detections:
+                if d["cls"] in ("left", "right") and "box_cx" in d and "box_w" in d \
+                        and d["conf"] >= self._rule(d["cls"])["min_conf"] and d.get("frame_id") is not None:
+                    p = self._last_lr
+                    if p is not None and p["cls"] != d["cls"] and 0 <= d["frame_id"] - p["frame_id"] <= flip_frames \
+                            and abs(d["box_cx"] - p["box_cx"]) < 1.5 * max(d["box_w"], p["box_w"], 1) \
+                            and 0.5 <= d["box_h"] / max(p["box_h"], 1) <= 2.0:
+                        self._last_lr = dict(d, cls=p["cls"])   # 같은 표지판: 처음 읽은 방향으로 계속 기억한다
+                        continue
+                    self._last_lr = d
                 keep.append(d)
             detections = keep
         # 회전 표지판이 이번 검출에 보였는지를 쿨다운·연속 검출 없이 매번 알린다 (TURN_SEEN).

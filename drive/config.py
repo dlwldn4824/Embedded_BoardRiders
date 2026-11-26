@@ -142,6 +142,8 @@ SIGN_CLASS_RULES = {            # 클래스별로 다르게 둘 값만 적는다
 }
 SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레임 안에서 이만큼 검출돼야 이벤트
 SIGN_CONFIRM_WINDOW = 15
+# 좌(우)회전으로 읽힌 자리에서 이 프레임 안에 반대 방향이 보이면 같은 표지판을 잘못 읽은 것으로 버린다 (약 1.5초)
+TURN_FLIP_FRAMES = 45
 HORN_CONFUSE_FRAMES = 30        # 경적이 보였던 자리에서 이 프레임 안에 보인 비슷한 크기의 회전 표지판은 경적으로 본다
 SIGN_EDGE_CUT_KINDS = ("TURN", "HORN")   # 화면 끝에 잘린 상자를 버리는 이벤트 종류. 경적 오른쪽 끝만 보이면 우회전으로 헷갈렸다
 SIGN_EDGE_MARGIN = 4            # 회전 표지판 상자가 화면 좌우 끝에서 이 px(640 기준) 안에 닿으면 잘린 것으로 보고 버린다

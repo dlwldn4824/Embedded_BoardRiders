@@ -1155,3 +1155,24 @@ def test_blocked_t_keeps_direction_when_no_recent_other_sign():
     run(c, 10)
     c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.9)
     assert c._turn is not None and c._turn[0] == "RIGHT"
+
+
+def test_same_sign_read_as_opposite_direction_is_dropped():
+    """좌회전으로 읽힌 자리에서 곧 같은 크기의 우회전이 보이면 같은 표지판을 잘못 읽은 것으로 버린다
+    (실차 run_20261126_115447: 길 건너편 좌회전 표지판을 지나가며 right 로 읽음)."""
+    it = SignInterpreter(config)
+    lr = lambda c, f, cx=420: {"cls": c, "conf": 0.8, "box_w": 70, "box_h": 70, "box_cx": cx, "box_y2": 200, "frame_id": f}  # noqa: E731
+    evs = it([lr("left", 1)]) + it([lr("left", 4)])
+    assert [e.value for e in evs if e.kind == "TURN"] == ["LEFT"]
+    out = []
+    for f in (20, 30, 40, 55):
+        out += it([lr("right", f, cx=440 + f)])
+    assert not [e for e in out if e.kind in ("TURN", "TURN_SEEN") and e.value == "RIGHT"]
+
+
+def test_real_opposite_sign_elsewhere_still_counts():
+    it = SignInterpreter(config)
+    lr = lambda c, f, cx: {"cls": c, "conf": 0.8, "box_w": 70, "box_h": 70, "box_cx": cx, "box_y2": 200, "frame_id": f}  # noqa: E731
+    it([lr("left", 1, 100)]); it([lr("left", 4, 100)])
+    out = it([lr("right", 20, 500)]) + it([lr("right", 24, 500)])
+    assert [e.value for e in out if e.kind == "TURN"] == ["RIGHT"]
