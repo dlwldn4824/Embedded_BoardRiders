@@ -1225,3 +1225,27 @@ def test_straight_sign_is_kept_on_wide_road_with_one_side_out_of_frame():
     for _ in range(40):
         c.update(LANE, 0.0, ["-R", "-R", "LR"], widths=[290, 260, 190])
     assert c.pending_turn == "STRAIGHT"
+
+
+def test_big_sign_gone_mid_frame_still_turns_and_failure_is_logged():
+    """아주 크게 보인 표지판은 화면 끝에 닿지 않고 사라져도 지나친 것으로 본다. 작은 표지판이면 돌지 않고, 왜 안 돌았는지 남긴다."""
+    from drive.signs import SignEvent
+    for h, should in ((100, True), (40, False)):
+        c = Controller(config)
+        c.set_running(True)
+        edges, opens = ["L-", "L-", "-R"], ["L?", "L?", "-R"]
+        for _ in range(60):
+            c.update("ONE_SIDE", -0.17, edges, opens=opens)
+        box = (420, 100, 420 + h * 0.8, 100 + h)
+        c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, box))
+        c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, box))
+        started, notes = None, []
+        for _ in range(config.SIGN_GONE_MAX_AGE + 5):
+            c.update("ONE_SIDE", -0.17, edges, opens=opens)
+            if c.notice:
+                notes.append(c.notice)
+            if c.turn_started and started is None:
+                started = c.turn_started
+        assert (started is not None) == should, h
+        if not should:
+            assert any("표지판 사라짐 회전 안 함" in n for n in notes)
