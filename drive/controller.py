@@ -434,6 +434,8 @@ class Controller:
         w = self._widths[1] if getattr(self, "_widths", None) and len(self._widths) > 1 and self._widths[1] else None
         if w:
             why += f" [중간 띠 폭 {w:.0f}px]"   # 넓은 길(WIDE_ROAD_MID_PX)로 봤는지 로그에서 확인
+        if getattr(self, "_ahead", None) is not None:
+            why += f" [앞 테두리 {self._ahead:.2f}]"   # 막힌 T자 판정(TEND_AHEAD_GREEN)을 로그에서 확인
         self.turn_started = (direction, why, "/".join(edges) if edges else "")   # main.py 가 로그로 찍고 지운다
 
     def _side_is_open(self, seen, open_pat, n=2):
@@ -710,6 +712,19 @@ class Controller:
                 and self._is_wide()
                 and self._since_curve > getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10))
 
+    def _tend_sign_ahead(self):
+        """정한 방향의 회전 표지판이 최근(TEND_SIGN_SEEN_FRAMES 안) 화면 가운데 근처에 크게 보였나 (T자 끝 정면 표지판)."""
+        cfg = self.cfg
+        if not getattr(cfg, "TEND_SIGN_MIN_H", 0):
+            return False
+        box, w = self._seen_box, cfg.CAMERA_SIZE[0]
+        if box is None or self._seen_dir != self.pending_turn \
+                or self._seen_age > getattr(cfg, "TEND_SIGN_SEEN_FRAMES", 40):
+            return False
+        cx = (box[0] + box[2]) / 2
+        return abs(cx - w / 2) <= getattr(cfg, "TEND_SIGN_CENTER", 0.25) * w and \
+            self._seen_max_h >= cfg.TEND_SIGN_MIN_H
+
     def _prefer_last_sign(self):
         """앞이 막힌 T자에서 돌 방향을 정할 때: 최근(TEND_LAST_SIGN_FRAMES 안)에 확정된 좌·우회전 표지판이 지금 정한 방향과
         다르면 그 표지판을 따른다. T자 바로 앞 표지판이 이 T자 것이다. 예전 방향이 쓰이지 않고 남아 있으면 새 표지판이
@@ -739,6 +754,11 @@ class Controller:
             return Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
         if self.pending_turn in ("LEFT", "RIGHT"):
             tend = self._ahead is not None and self._ahead >= getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
+            if not tend and self._tend_sign_ahead():
+                # T자 끝의 회전 표지판은 바깥 테두리 위, 차 정면에 크게 보인다 (십자 교차로 표지판은 모서리=옆). 테두리 초록
+                # 비율이 기준에 못 미쳐도 막힌 T자로 본다 (실차 run_20261126_122857 84초: 일반 교차로로 40 프레임 만에 돌아
+                # 오른쪽 블록 모서리를 밟음. 같은 T자를 150초에는 막힌 T자로 잡아 잘 돌았다)
+                tend = True
             # 넓은 바깥 도로(28cm)에서 좁은 옆길(21cm)로 돌 때: 가까운 띠는 반대쪽 경계가 화면 밖이라("--", 우회전이면 "-R")
             # 옆길 입구가 보이자마자 교차로로 잡힌다. 그때 먼 띠까지 회전할 쪽이 열려 있으면 옆길 끝(건너편 블록)이
             # 아직 멀다 -> 먼 띠에 회전할 쪽 경계가 다시 보일 때까지 회전 시작을 미룬다 (sim: 이 경우 20cm 일찍 돌아 모서리를 밟았다)

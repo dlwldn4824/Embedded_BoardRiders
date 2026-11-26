@@ -1181,3 +1181,16 @@ def test_real_opposite_sign_elsewhere_still_counts():
     it([lr("left", 1, 100)]); it([lr("left", 4, 100)])
     out = it([lr("right", 20, 500)]) + it([lr("right", 24, 500)])
     assert [e.value for e in out if e.kind == "TURN"] == ["RIGHT"]
+
+
+def test_centered_big_turn_sign_means_blocked_t():
+    """테두리 초록 비율이 모자라도, 정한 방향 표지판이 화면 가운데에 크게 보였으면 막힌 T자로 본다
+    (실차 run_20261126_122857 84초: 일반 교차로로 일찍 돌아 블록 모서리를 밟음)."""
+    from drive.signs import SignEvent
+    for cx, tend in ((320, True), (580, False)):
+        c = make()
+        c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (cx - 40, 100, cx + 40, 190)))
+        c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (cx - 40, 100, cx + 40, 190)))
+        run(c, 5)
+        c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.3)
+        assert c._turn is not None and ("막힌 T자" in c.turn_started[1]) == tend, cx

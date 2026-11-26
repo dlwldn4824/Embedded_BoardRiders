@@ -225,6 +225,11 @@ TURN_BLOCKED_ENTRY_FRAMES = 3   # 직진하다 앞이 막힌 T자에서 받아 �
 # 막힌 T자 끝에서 빠져나가는 회전: 교차로를 알아볼 때 먼 띠 위 초록 비율(ahead_green)이 TEND_AHEAD_GREEN 이상이면,
 # 정해진 진입 프레임 대신 먼 띠가 테두리(GG)에 닿은 뒤 TEND_EXTRA_FRAMES 더 가서 돈다 (최대 TURN_ENTRY_TEND_MAX)
 TEND_AHEAD_GREEN = 0.75
+# 위 비율이 모자라도, 정한 방향의 회전 표지판이 TEND_SIGN_SEEN_FRAMES 안에 화면 가운데(좌우 TEND_SIGN_CENTER 폭 안)에서
+# TEND_SIGN_MIN_H px 이상으로 보였으면 막힌 T자로 본다 (T자 끝 표지판은 차 정면 바깥 테두리 위). 0 이면 끔
+TEND_SIGN_MIN_H = 70
+TEND_SIGN_SEEN_FRAMES = 40
+TEND_SIGN_CENTER = 0.25
 AHEAD_PROBE_H = 30              # 먼 띠 위 몇 줄까지 보는지 (320x240 기준)
 TEND_EXTRA_FRAMES = 4
 TURN_ENTRY_TEND_MAX = 90
