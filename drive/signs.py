@@ -149,9 +149,22 @@ class SignInterpreter:
         # 비스듬히 본 표지판은 상자가 가늘다. 직진(↑) 표지판을 옆에서 보면 ↗ 처럼 보여 right 로 읽었다 (실차: 출발점
         # 오른쪽 앞 직진 표지판). 학습 데이터의 좌·우 표지판 상자는 95% 가 가로/세로 0.73 이상이다
         min_asp = getattr(cfg, "SIGN_TURN_MIN_ASPECT", 0.7)
-        detections = [d for d in detections
-                      if not (d["cls"] in ("left", "right") and "box_w" in d
-                              and d["box_w"] / max(d["box_h"], 1e-6) < min_asp)]
+        # 단, 같은 방향 표지판을 SIGN_TRACK_FRAMES 안에 이미 확정했으면 그 표지판을 계속 따라가는 것이라 SIGN_TURN_TRACK_ASPECT 까지
+        # 받는다 (실차 run_20261126_123624: 회전 반대쪽 테두리로 옮긴 좌회전 표지판을 커브에서 한 번 확정한 뒤 비스듬해져 놓쳤고,
+        # 표지판이 화면 밖으로 나간 시점을 못 잡아 옆길을 지나침)
+        track_asp = getattr(cfg, "SIGN_TURN_TRACK_ASPECT", min_asp)
+        track_frames = getattr(cfg, "SIGN_TRACK_FRAMES", 0)
+
+        def asp_ok(d):
+            if d["cls"] not in ("left", "right") or "box_w" not in d:
+                return True
+            a = d["box_w"] / max(d["box_h"], 1e-6)
+            if a >= min_asp:
+                return True
+            last = self._last_fired.get(d["cls"])
+            return a >= track_asp and last is not None and d.get("frame_id") is not None \
+                and 0 <= d["frame_id"] - last <= track_frames
+        detections = [d for d in detections if asp_ok(d)]
         # 회전 표지판이 한 화면에 여럿 보이면 가장 큰 것(가장 가까운 것)만 센다. 먼 교차로의 표지판이
         # 가까운 표지판보다 먼저 이벤트가 되어 방향이 바뀌는 것을 막는다
         turn = [d for d in detections if cfg.SIGN_CLASS_EVENTS.get(d["cls"], ("",))[0] == "TURN"

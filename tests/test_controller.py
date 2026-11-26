@@ -1194,3 +1194,13 @@ def test_centered_big_turn_sign_means_blocked_t():
         run(c, 5)
         c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.3)
         assert c._turn is not None and ("막힌 T자" in c.turn_started[1]) == tend, cx
+
+
+def test_oblique_box_of_already_confirmed_turn_sign_is_tracked():
+    """이미 확정한 좌회전 표지판은 비스듬해 가늘어져도 계속 따라간다 (TURN_SEEN). 처음 보는 가는 상자는 여전히 버린다."""
+    it = SignInterpreter(config)
+    d = lambda c, f, w: {"cls": c, "conf": 0.8, "box_w": w, "box_h": 80, "box_cx": 500, "box_y2": 200, "frame_id": f}  # noqa: E731
+    assert not [e for e in it([d("right", 1, 45)]) if e.kind == "TURN_SEEN"]     # 처음부터 가늘면 버림
+    it([d("left", 10, 70)]); it([d("left", 13, 70)])                               # 좌회전 확정
+    seen = [e for e in it([d("left", 60, 45)]) if e.kind == "TURN_SEEN"]
+    assert seen and seen[0].value == "LEFT"

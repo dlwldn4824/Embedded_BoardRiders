@@ -144,6 +144,9 @@ SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레
 SIGN_CONFIRM_WINDOW = 15
 # 좌(우)회전으로 읽힌 자리에서 이 프레임 안에 반대 방향이 보이면 같은 표지판을 잘못 읽은 것으로 버린다 (약 1.5초)
 TURN_FLIP_FRAMES = 45
+# 같은 방향 표지판을 이 프레임(약 10초) 안에 확정했으면, 비스듬해 가늘어진 상자도 가로/세로 SIGN_TURN_TRACK_ASPECT 까지 받는다
+SIGN_TRACK_FRAMES = 300
+SIGN_TURN_TRACK_ASPECT = 0.5
 # 회전 표지판이 회전 반대쪽 화면 끝으로 사라져도(옆길 정면 건너편 테두리에 둔 표지판) 표지판 사라짐 규칙으로 돈다.
 # 그때 SIGN_GONE_ENTRY 에 더하는 프레임. 표지판이 건너편에 있으면 차 중심보다 약 30cm 앞에서 화면 밖으로 나가
 # 옆길 중앙까지 더 가야 한다. 일찍 돌면 올리고 늦게 돌면 내린다. None 이면 반대쪽은 세지 않는다 (예전 동작)
