@@ -140,6 +140,7 @@ class Controller:
         self._seen_last_h = 0.0     # 그 표지판의 마지막 상자 높이
         self._sign_far_frames = 0   # 표지판이 아직 멀어 교차로 회전을 미룬 연속 프레임
         self._seen_straight = False # 마지막으로 봤을 때 곧게 가고 있었다
+        self._seen_steer_max = 9.0  # 마지막으로 봤을 때 최근 조향 크기 최댓값
         self._steer_hist = deque(maxlen=getattr(cfg, "SIGN_GONE_STEADY_FRAMES", 60))
         # 최근 프레임마다 왼쪽·오른쪽이 한 띠에서라도 열렸는지 (경계가 없음). 회전할 쪽이 내내 막혀 있으면 그쪽엔 길이 없다
         self._side_open_hist = {"L": deque(maxlen=getattr(cfg, "TURN_SIDE_OPEN_FRAMES", 150)),
@@ -184,6 +185,7 @@ class Controller:
                 # 커브를 돌며 차가 돌아서 표지판이 옆으로 빠진 것은 옆길에 다가간 것이 아니다 (sim 커브 뒤 우회전: 일찍 돎)
                 # 커브 뒤 좌우로 크게 흔들린 직후도 제외한다: 곧게 감속 직진하는 동안 차가 비스듬하면 표지판이 일찍 옆으로 빠졌다
                 # (sim 커브 뒤 우회전 23번: 조향 ±0.7 로 흔들린 뒤 24도 틀어진 채 직진, x 57 에서 표지판이 오른쪽 끝으로 빠짐)
+                self._seen_steer_max = max(self._steer_hist, default=0.0)
                 self._seen_straight = self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30) and \
                     max(self._steer_hist, default=0.0) < getattr(cfg, "SIGN_GONE_STEER", 0.6)
             return
@@ -844,17 +846,46 @@ class Controller:
         """넓은 바깥 도로(28cm)에서 경계로 옆길 입구를 끝내 못 볼 때의 마지막 수단: 회전 표지판이 충분히 크게(가깝게) 보였다가
         SIGN_GONE_FRAMES 동안 안 보이면(화면 옆으로 빠짐) 옆길에 거의 왔다. 표지판은 옆길 건너편 모서리에 있다.
         실차 run_20261111_202356: 가까운 띠는 블록 쪽 경계가 화면 밖, 먼 띠는 반대쪽만 보여 경계가 내내 L-/L-/-R 로
-        안 바뀌었고, 우회전 표지판을 7초 동안 보고도 옆길을 지나쳤다."""
+        안 바뀌었고, 우회전 표지판을 7초 동안 보고도 옆길을 지나쳤다.
+        정한 방향 쪽이 내내 막혀 있고 반대쪽만 열려 있었으면(넓은 길 옆길은 안쪽에만 있다) 같은 표지판을 반대로 읽은 것으로 보고
+        반대 방향으로도 따져 본다 (실차 140253: 오른쪽 테두리의 좌회전 표지판을 right 로 다섯 번 읽고 옆길을 지나침)."""
         cfg = self.cfg
         if not getattr(cfg, "SIGN_GONE_ENTRY", 0) or self.pending_turn not in ("LEFT", "RIGHT"):
             return False
+        ok, checks, box = self._sign_gone_check(self.pending_turn, flipped=False)
+        if ok:
+            return True
+        other = "LEFT" if self.pending_turn == "RIGHT" else "RIGHT"
+        if getattr(cfg, "CLOSED_SIDE_FRAMES", 0) and self._closed_vs_open(self.pending_turn):
+            ok2, _, _ = self._sign_gone_check(other, flipped=True)
+            if ok2:
+                self.notice = f"넓은 길 {self.pending_turn} 쪽은 내내 막힘 -> {other} 로 돎 (표지판 오인)"
+                self.pending_turn = other
+                return True
+        if box is not None and self._seen_age == getattr(cfg, "SIGN_GONE_MAX_AGE", 60) and self._seen_dir in ("LEFT", "RIGHT"):
+            # 표지판이 사라진 뒤 돌지 못하고 시간이 지났다: 어떤 조건이 빠졌는지 남긴다 (다음 실측에서 원인을 바로 보려고)
+            bad = [k for k, v in checks if not v]
+            self.notice = f"표지판 사라짐 회전 안 함 ({self.pending_turn}): " + ", ".join(bad) + \
+                f" [상자 x {box[0]:.0f}~{box[2]:.0f}]"
+        return False
+
+    def _closed_vs_open(self, direction):
+        """direction 쪽은 최근 CLOSED_SIDE_FRAMES 동안 한 번도 안 열렸고 반대쪽은 절반 넘게 열렸나."""
+        n = getattr(self.cfg, "CLOSED_SIDE_FRAMES", 0)
+        key = "R" if direction == "RIGHT" else "L"
+        other = "L" if key == "R" else "R"
+        ht, ho = list(self._side_open_hist[key])[-n:], list(self._side_open_hist[other])[-n:]
+        return n > 0 and len(ht) >= n and not any(ht) and sum(ho) >= n // 2
+
+    def _sign_gone_check(self, direction, flipped):
+        cfg = self.cfg
         # 회전할 쪽 화면 끝으로 빠져나간 표지판을 센다. 표지판이 옆길 정면 건너편(바깥 테두리)에 있으면 반대쪽으로 빠지고
         # (실차 1126), 이때는 SIGN_GONE_OPP_EXTRA 만큼 더 가서 돈다. 아주 크게(SIGN_GONE_NEAR_H 이상) 보였다가 사라졌으면
         # 화면 끝에 닿지 않았어도 지나친 것으로 보고, 상자 가운데가 화면 어느 쪽이었는지로 쪽을 정한다
         box, w, m = self._seen_box, cfg.CAMERA_SIZE[0], getattr(cfg, "SIGN_GONE_EDGE", 100)
         if box is None:
-            return False
-        right = self.pending_turn == "RIGHT"
+            return False, [], None
+        right = direction == "RIGHT"
         turn_side = box[2] >= w - m if right else box[0] <= m
         opp_side = box[0] <= m if right else box[2] >= w - m
         near_h = getattr(cfg, "SIGN_GONE_NEAR_H", 0)
@@ -862,26 +893,24 @@ class Controller:
             cx = (box[0] + box[2]) / 2
             turn_side = cx >= w / 2 if right else cx < w / 2
             opp_side = not turn_side
-        self._sign_gone_opp = bool(opp_side and not turn_side and getattr(cfg, "SIGN_GONE_OPP_EXTRA", None) is not None)
+        opp = bool(opp_side and not turn_side and getattr(cfg, "SIGN_GONE_OPP_EXTRA", None) is not None)
+        self._sign_gone_opp = opp
+        # 반대쪽으로 빠지는 표지판(옆길 건너편 테두리)은 커브 출구에서 읽게 되는 자리가 있어 조향 기준을 완화한다.
+        # 이때는 SIGN_GONE_OPP_EXTRA 만큼 더 가서 돌아 커브 직후 일찍 돌지 않는다
+        straight = self._seen_straight or (opp and self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30)
+                                           and getattr(self, "_seen_steer_max", 9.0) < getattr(cfg, "SIGN_GONE_STEER_OPP", 0.9))
         checks = [
-            ("표지판 방향", self._seen_dir == self.pending_turn),
-            ("화면 끝", turn_side or self._sign_gone_opp),
-            ("곧게 달리며 봄", self._seen_straight),
+            ("표지판 방향", flipped or self._seen_dir == direction),
+            ("화면 끝", turn_side or opp),
+            ("곧게 달리며 봄", straight),
             (f"크기 {self._seen_max_h:.0f}px", self._seen_max_h >= getattr(cfg, "SIGN_GONE_MIN_H", 50)),
             ("넓은 길", self._is_wide()),
             ("커브 뒤", self._since_curve > getattr(cfg, "WIDE_AFTER_CURVE_FRAMES", 30)),
-            # 회전할 쪽이 최근 한 번도 안 열렸으면 그쪽엔 길이 없다 (실차 134443: 오른쪽 테두리에 둔 좌회전 표지판을 우회전으로
-            # 더 많이 읽음. 오른쪽은 트랙 바깥 테두리라 세 띠 모두 오른쪽 경계가 내내 보였다)
+            # 회전할 쪽이 최근 한 번도 안 열렸으면 그쪽엔 길이 없다 (실차 134443)
             ("회전 쪽 열림", any(self._side_open_hist["R" if right else "L"])),
         ]
         age_ok = getattr(cfg, "SIGN_GONE_FRAMES", 20) <= self._seen_age <= getattr(cfg, "SIGN_GONE_MAX_AGE", 60)
-        ok = age_ok and all(v for _, v in checks)
-        if not ok and self._seen_age == getattr(cfg, "SIGN_GONE_MAX_AGE", 60) and self._seen_dir in ("LEFT", "RIGHT"):
-            # 표지판이 사라진 뒤 돌지 못하고 시간이 지났다: 어떤 조건이 빠졌는지 남긴다 (다음 실측에서 원인을 바로 보려고)
-            bad = [k for k, v in checks if not v]
-            self.notice = f"표지판 사라짐 회전 안 함 ({self.pending_turn}): " + ", ".join(bad) + \
-                f" [상자 x {box[0]:.0f}~{box[2]:.0f}]"
-        return ok
+        return age_ok and all(v for _, v in checks), checks, box
 
     def _sign_far(self):
         """넓은 바깥 도로에서 회전 표지판이 지금 보이는데 아직 작다(멀다) -> 옆길이 아직 멀다.

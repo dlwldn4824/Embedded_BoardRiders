@@ -1262,23 +1262,26 @@ def test_blocked_t_lower_threshold_on_wide_road_only():
         assert c._turn is not None and ("막힌 T자" in c.turn_started[1]) == tend, widths
 
 
-def test_sign_gone_does_not_turn_into_closed_side():
-    """회전할 쪽이 내내 막혀 있으면(세 띠 모두 그쪽 경계가 보임) 표지판 사라짐으로 돌지 않는다 (실차 134443)."""
+def test_sign_gone_flips_toward_open_side_when_turn_side_closed():
+    """정한 방향(오른쪽)이 내내 막혀 있고 왼쪽만 열려 있었으면, 같은 표지판을 반대로 읽은 것으로 보고 왼쪽으로 돈다
+    (실차 140253: 오른쪽 테두리의 좌회전 표지판을 right 로 다섯 번 읽음). 양쪽 다 막혀 있으면 돌지 않는다."""
     from drive.signs import SignEvent
-    c = Controller(config)
-    c.set_running(True)
-    edges = ["-R", "-R", "LR"]          # 오른쪽 경계가 계속 보임 (오른쪽은 트랙 바깥 테두리)
-    for _ in range(60):
-        c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
-    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (500, 100, 600, 200)))
-    c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (540, 100, 630, 200)))
-    notes = []
-    for _ in range(config.SIGN_GONE_MAX_AGE + 5):
-        c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
-        notes.append(c.notice)
-        assert not (c.turn_started and "표지판" in c.turn_started[1])
-    assert any(n and "회전 쪽 열림" in n for n in notes)
-
+    for edges, expect in ((["-R", "-R", "LR"], "LEFT"), (["LR", "LR", "LR"], None)):
+        c = Controller(config)
+        c.set_running(True)
+        for _ in range(120):
+            c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
+        c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (500, 100, 600, 200)))
+        c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (540, 100, 630, 200)))
+        started = None
+        for _ in range(config.SIGN_GONE_MAX_AGE + 5):
+            c.update("ONE_SIDE", 0.0, edges, widths=[290, 265, 190])
+            if c.turn_started and started is None:
+                started = c.turn_started
+        if expect is None:
+            assert started is None or "표지판" not in started[1]
+        else:
+            assert started is not None and started[0] == expect, started
 
 def test_wide_road_turn_toward_closed_side_is_flipped():
     """넓은 길에서 회전할 쪽(오른쪽)이 내내 막혀 있고 왼쪽만 열려 있었으면 교차로에서 왼쪽으로 돈다 (실차 135543)."""
