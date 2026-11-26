@@ -1162,17 +1162,27 @@ def test_blocked_t_keeps_direction_when_no_recent_other_sign():
     assert c._turn is not None and c._turn[0] == "RIGHT"
 
 
-def test_same_sign_read_as_opposite_direction_is_dropped():
-    """좌회전으로 읽힌 자리에서 곧 같은 크기의 우회전이 보이면 같은 표지판을 잘못 읽은 것으로 버린다
-    (실차 run_20261126_115447: 길 건너편 좌회전 표지판을 지나가며 right 로 읽음)."""
+def test_same_sign_majority_vote():
+    """같은 표지판을 좌·우로 섞어 읽으면 더 많이 읽힌 방향을 쓴다. 좌회전 2번 뒤 우회전 1번은 좌회전으로 본다."""
     it = SignInterpreter(config)
     lr = lambda c, f, cx=420: {"cls": c, "conf": 0.8, "box_w": 70, "box_h": 70, "box_cx": cx, "box_y2": 200, "frame_id": f}  # noqa: E731
     evs = it([lr("left", 1)]) + it([lr("left", 4)])
     assert [e.value for e in evs if e.kind == "TURN"] == ["LEFT"]
-    out = []
-    for f in (20, 30, 40, 55):
-        out += it([lr("right", f, cx=440 + f)])
+    out = it([lr("right", 20, cx=440)])
     assert not [e for e in out if e.kind in ("TURN", "TURN_SEEN") and e.value == "RIGHT"]
+
+
+def test_first_misread_is_corrected_by_majority_and_pending_fixed():
+    """처음에 우회전으로 잘못 읽어도 같은 표지판을 좌회전으로 더 많이 읽으면 좌회전 이벤트가 나고, 컨트롤러는 다음 교차로용으로
+    미루지 않고 정한 방향을 좌회전으로 바로잡는다 (실차 run_20261126_125325)."""
+    it = SignInterpreter(config)
+    c = make()
+    lr = lambda cl, f: {"cls": cl, "conf": 0.8, "box_w": 70, "box_h": 70, "box_cx": 450, "box_y2": 200, "frame_id": f}  # noqa: E731
+    for d in (lr("right", 1), lr("right", 4), lr("left", 12), lr("left", 20), lr("left", 28), lr("left", 60), lr("left", 64)):
+        for e in it([d]):
+            c.on_sign(e)
+        run(c, 2)
+    assert c.pending_turn == "LEFT"
 
 
 def test_real_opposite_sign_elsewhere_still_counts():

@@ -219,6 +219,17 @@ class Controller:
                 if ev.value in ("LEFT", "RIGHT"):
                     self._deferred_turn = ev.value
                 return
+            box = getattr(ev, "box", None)
+            pb = getattr(self, "_pending_box", None)
+            if self.pending_turn in ("LEFT", "RIGHT") and ev.value in ("LEFT", "RIGHT") and ev.value != self.pending_turn \
+                    and box and pb and self._pending_stale <= getattr(cfg, "SIGN_CORRECT_FRAMES", 100) \
+                    and abs((box[0] + box[2]) / 2 - (pb[0] + pb[2]) / 2) < 1.5 * max(box[2] - box[0], pb[2] - pb[0], 1):
+                # 방금 정한 방향과 반대인데 같은 자리의 표지판이다 = 같은 표지판을 다수결로 다시 읽은 것. 다음 교차로용으로
+                # 미루지 않고 바로잡는다 (실차 125325: 좌회전 표지판을 처음에 right 로 읽음)
+                self.notice = f"같은 표지판 다시 읽음: {self.pending_turn} -> {ev.value}"
+                self.pending_turn, self._pending_box, self._pending_stale = ev.value, box, 0
+                self._sign_h = box[3] - box[1]
+                return
             if self.pending_turn is not None and ev.value != self.pending_turn and \
                     self._pending_stale < getattr(cfg, "PENDING_STALE_FRAMES", 200):
                 # 앞 표지판 방향을 아직 쓰지 않았다 (그 교차로·옆길을 아직 안 지남). 뒤 표지판은 다음 교차로 것이므로
@@ -232,6 +243,7 @@ class Controller:
             self.pending_turn = ev.value
             box = getattr(ev, "box", None)
             self._sign_h = (box[3] - box[1]) if box else None   # 표지판이 가까울수록 크다 (옆길 회전 시점)
+            self._pending_box = box
             # 같은 표지판을 다시 보면 옆길 대기 시간을 처음부터 센다. 실차는 느려서(약 5cm/s) 표지판을 처음 본 뒤
             # 옆길까지 대기 시간보다 오래 걸린 일이 있었다 (우회전 표지판을 7번 보고도 옆길을 지나침)
             self._pending_age = 0

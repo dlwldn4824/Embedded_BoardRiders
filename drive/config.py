@@ -142,8 +142,10 @@ SIGN_CLASS_RULES = {            # 클래스별로 다르게 둘 값만 적는다
 }
 SIGN_CONFIRM_HITS = 2           # 같은 클래스가 SIGN_CONFIRM_WINDOW 프레임 안에서 이만큼 검출돼야 이벤트
 SIGN_CONFIRM_WINDOW = 15
-# 좌(우)회전으로 읽힌 자리에서 이 프레임 안에 반대 방향이 보이면 같은 표지판을 잘못 읽은 것으로 버린다 (약 1.5초)
+# 비슷한 자리에서 이 프레임 안에 이어 보인 좌·우 검출은 같은 표지판으로 보고 판독 다수결로 방향을 정한다 (약 1.5초)
 TURN_FLIP_FRAMES = 45
+# 정한 방향과 반대인 표지판이 이 프레임 안에 같은 자리에서 확정되면(다수결이 바뀜) 다음 교차로용으로 미루지 않고 바로잡는다
+SIGN_CORRECT_FRAMES = 100
 # 같은 방향 표지판을 이 프레임(약 10초) 안에 확정했으면, 비스듬해 가늘어진 상자도 가로/세로 SIGN_TURN_TRACK_ASPECT 까지 받는다
 SIGN_TRACK_FRAMES = 300
 SIGN_TURN_TRACK_ASPECT = 0.5

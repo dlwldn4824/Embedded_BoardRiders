@@ -89,7 +89,7 @@ class SignInterpreter:
         self._last_fired = {}
         self._hits = defaultdict(deque)   # 클래스별 조건을 통과한 frame_id
         self._last_horn = None            # 마지막 경적 검출 (우회전으로 헷갈린 것 거르기)
-        self._last_lr = None              # 마지막 좌·우회전 검출 (같은 표지판을 반대 방향으로 읽은 것 거르기)
+        self._last_lr = None              # 지금 보이는 좌·우 표지판의 자리·판독 표 (같은 표지판 다수결)
         self._red_fired = False           # 빨간불 이벤트를 냈고 아직 꺼짐(OFF)을 알리지 않았다
         self._red_missing = 0             # 빨간불이 하나도 안 보인 연속 검출 횟수
         self._red_cut = False             # 마지막 빨간불 상자가 화면 끝에 닿았다 (사라지면 꺼진 건지 화면 밖으로 나간 건지 모름)
@@ -201,25 +201,29 @@ class SignInterpreter:
                     continue
                 keep.append(d)
             detections = keep
-        # 같은 표지판을 반대 방향으로 읽은 것 거르기: 좌(우)회전으로 읽혔던 자리에서 TURN_FLIP_FRAMES 안에 비슷한 크기의
-        # 우(좌)회전이 보이면 같은 표지판을 비스듬히 보고 잘못 읽은 것으로 보고 버린다. 버린 상자 자리로 기억을 옮겨
-        # 계속 잘못 읽어도 계속 버린다 (실차 run_20261126_115447: 길 건너편 좌회전 표지판을 옆에서 지나가며 right 0.64 로
-        # 읽었고, 그 우회전이 회전 방향을 덮어써 반대로 돌았다)
+        # 같은 표지판의 좌·우 판독 다수결: 비슷한 자리·크기에서 TURN_FLIP_FRAMES 안에 이어 보인 좌·우회전 검출은 같은 표지판으로
+        # 보고, 지금까지 더 많이 읽힌 방향으로 바꿔 쓴다 (같으면 먼저 정한 방향). 비스듬한 표지판을 가끔 반대로 읽었다
+        # (실차 run_20261126_115447: left 를 보다 right 0.64 한 번 / 125325: 처음부터 right 로 읽고 오른쪽 테두리로 돎)
         flip_frames = getattr(cfg, "TURN_FLIP_FRAMES", 0)
         if flip_frames:
-            keep = []
             for d in detections:
-                if d["cls"] in ("left", "right") and "box_cx" in d and "box_w" in d \
-                        and d["conf"] >= self._rule(d["cls"])["min_conf"] and d.get("frame_id") is not None:
-                    p = self._last_lr
-                    if p is not None and p["cls"] != d["cls"] and 0 <= d["frame_id"] - p["frame_id"] <= flip_frames \
-                            and abs(d["box_cx"] - p["box_cx"]) < 1.5 * max(d["box_w"], p["box_w"], 1) \
-                            and 0.5 <= d["box_h"] / max(p["box_h"], 1) <= 2.0:
-                        self._last_lr = dict(d, cls=p["cls"])   # 같은 표지판: 처음 읽은 방향으로 계속 기억한다
-                        continue
-                    self._last_lr = d
-                keep.append(d)
-            detections = keep
+                if d["cls"] not in ("left", "right") or "box_cx" not in d or "box_w" not in d \
+                        or d["conf"] < self._rule(d["cls"])["min_conf"] or d.get("frame_id") is None:
+                    continue
+                t = self._last_lr
+                if t is not None and 0 <= d["frame_id"] - t["frame_id"] <= flip_frames \
+                        and abs(d["box_cx"] - t["box_cx"]) < 1.5 * max(d["box_w"], t["box_w"], 1) \
+                        and 0.5 <= d["box_h"] / max(t["box_h"], 1) <= 2.0:
+                    votes = t["votes"]
+                else:
+                    votes, t = {"left": 0, "right": 0}, {"label": d["cls"]}
+                votes[d["cls"]] += 1
+                label = t["label"]
+                if votes["left"] != votes["right"]:
+                    label = "left" if votes["left"] > votes["right"] else "right"
+                self._last_lr = {"box_cx": d["box_cx"], "box_w": d["box_w"], "box_h": d["box_h"],
+                                 "frame_id": d["frame_id"], "votes": votes, "label": label}
+                d["cls"] = label
         # 회전 표지판이 이번 검출에 보였는지를 쿨다운·연속 검출 없이 매번 알린다 (TURN_SEEN).
         # 넓은 바깥 도로에서는 경계로 옆길 입구를 못 볼 때가 있어, 표지판이 가까이 왔다가 화면 밖으로 나간 시점을
         # 회전 시점으로 쓴다 (실차 run_20261111_202356: 경계가 내내 L-/L-/-R 로 안 바뀌어 옆길을 지나침)
