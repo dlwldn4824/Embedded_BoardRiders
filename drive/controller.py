@@ -159,6 +159,8 @@ class Controller:
         self._last_pid = None       # 마지막으로 도로를 보고 낸 PID 명령 (잠깐 초록만 보일 때 유지)
         self._lost_hold = 0
         self._deferred_turn = None  # 앞 표지판 방향을 쓰기 전에 본 다른 방향 (다음 교차로용)
+        self._last_sign_dir = None  # 마지막으로 확정된 좌·우회전 표지판 방향 (받아 두기만 한 것 포함)
+        self._last_sign_age = 999
         self._pending_stale = 0     # pending_turn 표지판을 마지막으로 본 뒤 지난 프레임
         self._post_turn = False  # 회전을 막 끝내 아직 교차로 안 (비전은 INTERSECTION 이지만 새 길을 따라간다)
         self._post_lane = self._post_frames = 0
@@ -190,6 +192,8 @@ class Controller:
                 # 방금 돈 방향과 같은 표지판을 회전 직후 다시 봤다 = 방금 그 표지판 (실차 run_060120: 우회전 직후 같은 표지판을
                 # 다시 보고 우회전이 또 예약됨)
                 return
+            if self._turn is None and ev.value in ("LEFT", "RIGHT"):
+                self._last_sign_dir, self._last_sign_age = ev.value, 0
             if self._turn is not None:
                 # 옆길 회전을 정하고 직진(ENTRY) 중인데 같은 방향 표지판이 충분히 커졌다(가깝다) -> 직진을 줄이고 곧 돈다
                 box = getattr(ev, "box", None)
@@ -706,6 +710,18 @@ class Controller:
                 and self._is_wide()
                 and self._since_curve > getattr(self.cfg, "CURVE_TURN_BLOCK_FRAMES", 10))
 
+    def _prefer_last_sign(self):
+        """앞이 막힌 T자에서 돌 방향을 정할 때: 최근(TEND_LAST_SIGN_FRAMES 안)에 확정된 좌·우회전 표지판이 지금 정한 방향과
+        다르면 그 표지판을 따른다. T자 바로 앞 표지판이 이 T자 것이다. 예전 방향이 쓰이지 않고 남아 있으면 새 표지판이
+        '다음 교차로용'으로 밀려나 반대로 돌 수 있었다 (실차 1126: 좌회전 표지판을 T자 건너편으로 옮기자 우회전)."""
+        last = self._last_sign_dir
+        if last in ("LEFT", "RIGHT") and last != self.pending_turn and \
+                self._last_sign_age <= getattr(self.cfg, "TEND_LAST_SIGN_FRAMES", 200):
+            self.notice = f"막힌 T자: 정한 방향 {self.pending_turn} 대신 마지막 표지판 {last}"
+            if self._deferred_turn == last:
+                self._deferred_turn = None
+            self.pending_turn = last
+
     def _intersection(self, edges=None):
         if self.pending_turn in (None, "STRAIGHT") and self._deferred_turn in ("LEFT", "RIGHT") \
                 and edges and edges[-1] == "GG" and not self._cross_frames:
@@ -730,6 +746,8 @@ class Controller:
                 return Command(throttle=self._slow(self.cfg.INTERSECTION_THROTTLE), steering=0.0, action="CROSS")
             self._wide_wait = 0
             late, self._late_entry = self._late_entry, None
+            if tend:
+                self._prefer_last_sign()
             entry = getattr(self.cfg, "TURN_ENTRY_TEND_MAX", 90) if tend else late
             why = "막힌 T자 끝" if tend else ("교차로 (표지판 늦게 확정)" if late else "교차로")
             if not tend and not late and self._near_cut and \
@@ -796,6 +814,7 @@ class Controller:
 
     def _tick_timers(self):
         self._seen_age = min(self._seen_age + 1, 999)
+        self._last_sign_age = min(self._last_sign_age + 1, 999)
         if self._speed_frames:
             self._speed_frames -= 1
             if self._speed_frames == 0:
@@ -907,7 +926,9 @@ class Controller:
                     and (state in (OFF_ROAD, LOST) or (edges and "GG" in edges)):
                 # 직진하다 앞이 막혔다 (T자 끝) -> 받아 둔 방향으로 바로 돈다
                 d, self._deferred_turn, self._cross_frames = self._deferred_turn, None, 0
-                self.pending_turn = None
+                self.pending_turn = d
+                self._prefer_last_sign()
+                d, self.pending_turn = self.pending_turn, None
                 self._start_turn(d, getattr(self.cfg, "TURN_BLOCKED_ENTRY_FRAMES", 3), "막힌 T자", edges)
             if cmd is None and self._turn is None and not self._post_turn and not self._cross_frames \
                     and self.pending_turn in ("LEFT", "RIGHT") and state in (OFF_ROAD, LOST):

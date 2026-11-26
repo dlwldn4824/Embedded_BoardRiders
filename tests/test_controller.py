@@ -1134,3 +1134,24 @@ def test_near_band_cut_does_not_delay_left_turn():
                 return i
         return None
     assert abs(frames_to_turn(["--", "LR", "LR"]) - frames_to_turn(["--", "--", "-R"])) <= 2
+
+
+def test_blocked_t_uses_latest_turn_sign():
+    """막힌 T자: 앞서 정해 둔 우회전이 남아 있어도 T자 앞에서 마지막으로 확정된 좌회전 표지판을 따른다
+    (실차 1126: 좌회전 표지판을 T자 건너편으로 옮기자 우회전)."""
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    run(c, 10)
+    c.on_sign(ev("TURN", "LEFT"))          # 앞 방향이 남아 있어 '다음 교차로용'으로 받아 둔다
+    assert c.pending_turn == "RIGHT"
+    run(c, 10)
+    c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.9)
+    assert c._turn is not None and c._turn[0] == "LEFT"
+
+
+def test_blocked_t_keeps_direction_when_no_recent_other_sign():
+    c = make()
+    c.on_sign(ev("TURN", "RIGHT"))
+    run(c, 10)
+    c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.9)
+    assert c._turn is not None and c._turn[0] == "RIGHT"
