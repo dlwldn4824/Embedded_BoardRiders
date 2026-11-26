@@ -157,6 +157,8 @@ SIGN_GONE_OPP_EXTRA = 30
 SIGN_GONE_NEAR_H = 90
 # 표지판 사라짐으로 돌 때, 회전할 쪽이 최근 이 프레임 안에 한 띠에서라도 열려 보였어야 한다 (막힌 쪽으로 돌지 않게)
 TURN_SIDE_OPEN_FRAMES = 150
+# 넓은 길 교차로: 그 전 이 프레임 동안 회전할 쪽이 한 번도 안 열렸고 반대쪽은 절반 넘게 열렸으면 반대로 돈다 (0 이면 끔)
+CLOSED_SIDE_FRAMES = 100
 HORN_CONFUSE_FRAMES = 30        # 경적이 보였던 자리에서 이 프레임 안에 보인 비슷한 크기의 회전 표지판은 경적으로 본다
 SIGN_EDGE_CUT_KINDS = ("TURN", "HORN")   # 화면 끝에 잘린 상자를 버리는 이벤트 종류. 경적 오른쪽 끝만 보이면 우회전으로 헷갈렸다
 SIGN_EDGE_MARGIN = 4            # 회전 표지판 상자가 화면 좌우 끝에서 이 px(640 기준) 안에 닿으면 잘린 것으로 보고 버린다

@@ -742,6 +742,24 @@ class Controller:
         return abs(cx - w / 2) <= getattr(cfg, "TEND_SIGN_CENTER", 0.25) * w and \
             self._seen_max_h >= cfg.TEND_SIGN_MIN_H
 
+    def _flip_closed_side_turn(self):
+        """넓은 바깥 도로의 옆길은 트랙 안쪽에만 있다 (바깥쪽은 테두리). 교차로에 오기 전 CLOSED_SIDE_FRAMES 동안 회전할 쪽은
+        한 번도 안 열렸고 반대쪽만 열렸으면, 표지판 방향을 잘못 읽은 것으로 보고 열린 쪽으로 돈다 (실차 135543: 오른쪽 테두리에
+        둔 좌회전 표지판을 right 로 읽고 교차로 규칙으로 바깥 테두리 쪽으로 돎)."""
+        cfg = self.cfg
+        n = getattr(cfg, "CLOSED_SIDE_FRAMES", 0)
+        if not n or not self._is_wide():
+            return
+        skip = getattr(cfg, "CLOSED_SIDE_SKIP", 15)   # 교차로로 잡히는 순간(양쪽 다 열림)은 뺀다
+        key = "R" if self.pending_turn == "RIGHT" else "L"
+        other = "L" if key == "R" else "R"
+        hist_t = list(self._side_open_hist[key])[:-skip] if len(self._side_open_hist[key]) > skip else []
+        hist_o = list(self._side_open_hist[other])[:-skip] if len(self._side_open_hist[other]) > skip else []
+        if len(hist_t) >= n and not any(hist_t[-n:]) and sum(hist_o[-n:]) >= n // 2:
+            new = "LEFT" if self.pending_turn == "RIGHT" else "RIGHT"
+            self.notice = f"넓은 길 {self.pending_turn} 쪽은 내내 막힘 -> {new} 로 돎 (표지판 오인)"
+            self.pending_turn = new
+
     def _prefer_last_sign(self):
         """앞이 막힌 T자에서 돌 방향을 정할 때: 최근(TEND_LAST_SIGN_FRAMES 안)에 확정된 좌·우회전 표지판이 지금 정한 방향과
         다르면 그 표지판을 따른다. T자 바로 앞 표지판이 이 T자 것이다. 예전 방향이 쓰이지 않고 남아 있으면 새 표지판이
@@ -770,6 +788,7 @@ class Controller:
             # 직전 PID 조향을 유지하며 커브를 마저 돈다
             return Command(throttle=self._last_pid.throttle, steering=self._last_pid.steering, action="PID")
         if self.pending_turn in ("LEFT", "RIGHT"):
+            self._flip_closed_side_turn()
             thr = getattr(self.cfg, "TEND_AHEAD_GREEN", 0.75)
             w = self._widths[1] if self._widths and len(self._widths) > 1 else None
             if w and w >= getattr(self.cfg, "WIDE_ROAD_MID_PX", 230):

@@ -1278,3 +1278,30 @@ def test_sign_gone_does_not_turn_into_closed_side():
         notes.append(c.notice)
         assert not (c.turn_started and "표지판" in c.turn_started[1])
     assert any(n and "회전 쪽 열림" in n for n in notes)
+
+
+def test_wide_road_turn_toward_closed_side_is_flipped():
+    """넓은 길에서 회전할 쪽(오른쪽)이 내내 막혀 있고 왼쪽만 열려 있었으면 교차로에서 왼쪽으로 돈다 (실차 135543)."""
+    c = make()
+    w = [290, 270, 190]
+    for _ in range(80):
+        c.update("ONE_SIDE", 0.0, ["-R", "-R", "-R"], widths=w)
+    c.on_sign(ev("TURN", "RIGHT"))
+    for _ in range(60):
+        c.update("ONE_SIDE", 0.0, ["-R", "-R", "LR"], widths=w)
+    for _ in range(200):
+        c.update(INTERSECTION, None, ["--", "--", "-R"], widths=w)
+        if c._turn is not None:
+            break
+    assert c._turn is not None and c._turn[0] == "LEFT"
+
+
+def test_t_end_turn_with_both_sides_closed_is_not_flipped():
+    """양쪽 다 막혀 있던 길(T자로 가는 세로 도로)은 뒤집지 않는다."""
+    c = make()
+    w = [290, 270, 190]
+    for _ in range(150):
+        c.update(LANE, 0.0, ["LR", "LR", "LR"], widths=w)
+    c.on_sign(ev("TURN", "RIGHT"))
+    c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.8, widths=w)
+    assert c._turn is not None and c._turn[0] == "RIGHT"
