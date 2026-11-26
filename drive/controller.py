@@ -495,7 +495,9 @@ class Controller:
         seen_all = opens if opens is not None else edges
         if edges:
             self._track_sides(seen_all, getattr(cfg, "SIDE_OPEN_BANDS", 2))
-        if self.pending_turn == "STRAIGHT" and edges and not self._recent_cross_now():
+        if self.pending_turn == "STRAIGHT" and edges and not self._recent_cross_now() and not self._is_wide():
+            # 넓은 바깥 도로에서는 하지 않는다: 한쪽 경계가 늘 화면 밖이라 옆길이 없어도 -R/L- 가 이어져, 교차로에 가기 전에
+            # 직진을 지웠다 (실차 1126: 직진 표지판을 보고도 교차로에서 직진을 잊음). 직진은 교차로를 지날 때 지운다
             # 직진 표지판을 보고 옆길(진짜 열린 길)을 지나친다 -> 직진을 쓴 것. 예전에는 십자 교차로에서만 지워져서,
             # 뒤에 본 회전 표지판이 다음 교차로용으로 오래 보류되어 우회전 옆길을 지나쳤다
             seen = opens if opens is not None else edges

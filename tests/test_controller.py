@@ -1214,3 +1214,14 @@ def test_oblique_box_of_already_confirmed_turn_sign_is_tracked():
     it([d("left", 10, 70)]); it([d("left", 13, 70)])                               # 좌회전 확정
     seen = [e for e in it([d("left", 60, 45)]) if e.kind == "TURN_SEEN"]
     assert seen and seen[0].value == "LEFT"
+
+
+def test_straight_sign_is_kept_on_wide_road_with_one_side_out_of_frame():
+    """넓은 바깥 도로에서 한쪽 경계가 화면 밖(-R)이어도 직진 예약을 지우지 않는다 (실차 1126: 교차로 전에 직진을 잊음)."""
+    c = make()
+    for _ in range(60):
+        c.update(LANE, 0.0, ["-R", "-R", "LR"], widths=[290, 260, 190])
+    c.on_sign(ev("TURN", "STRAIGHT"))
+    for _ in range(40):
+        c.update(LANE, 0.0, ["-R", "-R", "LR"], widths=[290, 260, 190])
+    assert c.pending_turn == "STRAIGHT"
