@@ -790,7 +790,14 @@ class Controller:
             return False
         # 회전할 쪽 화면 끝으로 빠져나간 표지판만 센다 (반대쪽으로 빠지면 길 건너편 표지판이라 옆길 위치와 상관없다. sim)
         box, w, m = self._seen_box, cfg.CAMERA_SIZE[0], getattr(cfg, "SIGN_GONE_EDGE", 100)
-        if box is None or not (box[2] >= w - m if self.pending_turn == "RIGHT" else box[0] <= m):
+        if box is None:
+            return False
+        turn_side = box[2] >= w - m if self.pending_turn == "RIGHT" else box[0] <= m
+        opp_side = box[0] <= m if self.pending_turn == "RIGHT" else box[2] >= w - m
+        # 표지판이 옆길 정면 건너편(바깥 테두리)에 있으면 회전 반대쪽으로 빠진다 (실차 1126: 좌회전 표지판을 T자 건너편으로
+        # 옮기자 회전 시점을 못 잡고 지나침). 이때는 SIGN_GONE_OPP_EXTRA 만큼 더 가서 돈다
+        self._sign_gone_opp = bool(opp_side and not turn_side and getattr(cfg, "SIGN_GONE_OPP_EXTRA", None) is not None)
+        if not turn_side and not self._sign_gone_opp:
             return False
         return (self._seen_dir == self.pending_turn and self._seen_straight
                 and self._seen_max_h >= getattr(cfg, "SIGN_GONE_MIN_H", 50)
@@ -945,8 +952,10 @@ class Controller:
                 cmd = self._turning(state, error, edges)
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._sign_gone():
-                self._start_turn(self.pending_turn, getattr(self.cfg, "SIGN_GONE_ENTRY", 20),
-                                 f"넓은 길 옆길 (표지판 {self._seen_max_h:.0f}px 뒤 화면 밖)", edges)
+                opp = getattr(self, "_sign_gone_opp", False)
+                entry = getattr(self.cfg, "SIGN_GONE_ENTRY", 20) + (getattr(self.cfg, "SIGN_GONE_OPP_EXTRA", 0) if opp else 0)
+                self._start_turn(self.pending_turn, entry,
+                                 f"넓은 길 옆길 (표지판 {self._seen_max_h:.0f}px 뒤 {'반대쪽 ' if opp else ''}화면 밖)", edges)
                 cmd = self._turning(state, error, edges)
             if cmd is None and self._turn is None and not self._post_turn and state in PID_STATES \
                     and self._wide_side_wait(edges):

@@ -1007,8 +1007,9 @@ def test_wide_road_turn_when_sign_leaves_frame():
     assert started is not None and started >= config.SIGN_GONE_FRAMES - 1
 
 
-def test_sign_leaving_opposite_side_does_not_turn():
-    """반대쪽(왼쪽) 끝으로 빠진 우회전 표지판은 옆길 위치와 상관없다: 표지판 사라짐으로 돌지 않는다."""
+def test_sign_leaving_opposite_side_turns_later():
+    """반대쪽(왼쪽) 끝으로 빠진 우회전 표지판(옆길 정면 건너편에 둔 표지판)도 표지판 사라짐으로 돈다. 단 SIGN_GONE_OPP_EXTRA
+    만큼 더 가서 돌기 시작한다 (실차 1126: 좌회전 표지판을 T자 건너편으로 옮기자 회전 시점을 못 잡고 지나침)."""
     from drive.signs import SignEvent
     c = Controller(config)
     c.set_running(True)
@@ -1018,9 +1019,13 @@ def test_sign_leaving_opposite_side_does_not_turn():
         c.update("ONE_SIDE", -0.17, edges, opens=opens)
     c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.8, 1, (40, 100, 100, 160)))
     c.on_sign(SignEvent("TURN_SEEN", "RIGHT", "right", 0.8, 1, (10, 100, 110, 200)))
+    started = None
     for _ in range(config.SIGN_GONE_FRAMES + 5):
         c.update("ONE_SIDE", -0.17, edges, opens=opens)
-        assert not (c.turn_started and "표지판" in c.turn_started[1])
+        if c.turn_started and started is None:
+            started = c.turn_started
+    assert started is not None and "반대쪽" in started[1]
+    assert c._turn[3] == config.SIGN_GONE_ENTRY + config.SIGN_GONE_OPP_EXTRA
 
 
 def test_wide_road_small_sign_does_not_turn_at_false_intersection():
