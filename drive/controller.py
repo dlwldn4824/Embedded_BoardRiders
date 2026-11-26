@@ -97,6 +97,7 @@ class Controller:
         self._widths = None         # 비전이 익힌 띠별 도로 폭 (update 마다 받음)
         self._horn_ignore = 0       # 경적을 울린 뒤 같은 경적 표지판을 무시하는 남은 프레임
         self._red_ignore = 0        # 빨간불 대기를 마치고 출발한 뒤 빨간불을 무시하는 남은 프레임
+        self._deferred_same_sign = False  # 받아 둔 방향이 지금 표지판과 같은 자리에서 본 반대 판독이다
         self._near_cut = False      # 이번 교차로가 --/LR/LR (가까운 띠만 잘림) 으로 잡혔다
         self._prev_vis_state = None
         self._wait = None           # (종류, 남은 프레임): "STOP" 정지 표지판, "RED" 빨간불
@@ -241,6 +242,14 @@ class Controller:
                 # 받아 두었다가 앞 방향을 쓴 뒤에 적용한다. 앞 표지판은 교차로 약 30cm 전에 화면 밖으로 나가므로
                 # "안 보이면 바로 바꾸기"는 하지 않는다
                 self._deferred_turn = ev.value
+                # 지금 정한 방향의 표지판과 같은 자리에서 본 반대 방향이면 같은 표지판을 잘못 읽은 것일 수 있다: 표시해 두고
+                # 정한 방향으로 돌기 시작할 때 버린다 (실차 142434: 좌회전 표지판을 한 번 right 로 읽어 받아 뒀다가, 좌회전 직후
+                # 그 우회전으로 큰길로 되돌아감)
+                pb = getattr(self, "_pending_box", None)
+                self._deferred_same_sign = bool(
+                    box and pb and ev.value in ("LEFT", "RIGHT") and self.pending_turn in ("LEFT", "RIGHT")
+                    and abs((box[0] + box[2]) / 2 - (pb[0] + pb[2]) / 2)
+                    < getattr(cfg, "SAME_SIGN_X_RATIO", 3.0) * max(box[2] - box[0], pb[2] - pb[0], 1))
                 return
             if ev.value != self.pending_turn:
                 self._deferred_turn = None
@@ -437,6 +446,11 @@ class Controller:
         return clamp(throttle * self.speed_scale, self._min_throttle(), self.cfg.MAX_THROTTLE)
 
     def _start_turn(self, direction, entry_frames=None, why="교차로", edges=None):
+        if getattr(self, "_deferred_same_sign", False) and self._deferred_turn in ("LEFT", "RIGHT") \
+                and self._deferred_turn != direction:
+            self.notice = f"같은 표지판의 반대 판독 {self._deferred_turn} 버림 ({direction} 로 돎)"
+            self._deferred_turn = None
+        self._deferred_same_sign = False
         self._done_run = 0
         self._wide_wait = 0
         self._far_open_hist.clear()

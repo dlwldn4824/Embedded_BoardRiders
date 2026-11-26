@@ -1308,3 +1308,16 @@ def test_t_end_turn_with_both_sides_closed_is_not_flipped():
     c.on_sign(ev("TURN", "RIGHT"))
     c.update(INTERSECTION, None, ["--", "--", "--"], ahead=0.8, widths=w)
     assert c._turn is not None and c._turn[0] == "RIGHT"
+
+
+def test_same_sign_opposite_read_is_dropped_when_turn_starts():
+    """좌회전 표지판을 한 번 right 로 잘못 읽어 '다음 교차로용'으로 받아 둔 것은 좌회전을 시작할 때 버린다
+    (실차 142434: 좌회전 직후 받아 둔 우회전으로 큰길로 되돌아감)."""
+    from drive.signs import SignEvent
+    c = make()
+    c.on_sign(SignEvent("TURN", "LEFT", "left", 0.8, 1, (430, 100, 500, 170)))
+    run(c, 10)
+    c.on_sign(SignEvent("TURN", "RIGHT", "right", 0.7, 30, (580, 100, 650, 170)))   # 같은 자리 바로잡기(1.5배)보다는 멂
+    assert c._deferred_turn == "RIGHT"
+    c._start_turn("LEFT", 5, "시험")
+    assert c._deferred_turn is None
